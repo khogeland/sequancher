@@ -199,14 +199,14 @@ uint8_t shift_registers_io(uint8_t out) {
 #define AIN_PTB 22 
 #define AIN_SMB 16 
 
-#define GATE_A  0b10000000
+#define GATE_B  0b10000000
 #define LED_A_F 0b01000000
 #define LED_A_P 0b00100000
 #define LED_A_S 0b00010000
 #define LED_B_F 0b00001000
 #define LED_B_P 0b00000100
 #define LED_B_S 0b00000010
-#define GATE_B  0b00000001
+#define GATE_A  0b00000001
 
 uint16_t read_adc(uint8_t muxpos) {
     /*ADC0.MUXPOS = 0x7;*/
