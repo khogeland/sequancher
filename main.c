@@ -248,6 +248,7 @@ void write_dac(uint8_t channel, uint16_t value) {
 
 uint16_t state = 0;
 
+//TODO initialize state to temp sensor reading
 uint16_t prng() {
   state = (2053 * state + 13849) % 65536;
   return state;
@@ -287,7 +288,6 @@ uint16_t adjust(uint16_t reading, uint16_t min, uint16_t range) {
 }
 
 int main(void) {
-/*void test(void) {*/
   initialize();
   uint8_t seqA_start = 0;
   uint8_t seqB_start = 0;
@@ -496,8 +496,6 @@ int main(void) {
     uint8_t b_lr = (flipped_b >> index_b) & 1;
     uint8_t a_sampling = ((flipped_sample_a >> index_a) & 1) | btn_sample_a;
     uint8_t b_sampling = ((flipped_sample_b >> index_b) & 1) | btn_sample_b;
-
-    // TODO LEDs
 
     /*shift_out = shift_out & 0b01111110;*/
 
