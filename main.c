@@ -6,11 +6,9 @@
 #include <util/delay.h>
 
 static int uart_putchar(char c, FILE *stream);
-static FILE mystdout = FDEV_SETUP_STREAM(uart_putchar, NULL,
-                                         _FDEV_SETUP_WRITE);
+static FILE mystdout = FDEV_SETUP_STREAM(uart_putchar, NULL, _FDEV_SETUP_WRITE);
 
-static int uart_putchar(char c, FILE *stream)
-{
+static int uart_putchar(char c, FILE *stream) {
   if (c == '\n')
     uart_putchar('\r', stream);
   loop_until_bit_is_set(USART0.STATUS, USART_DREIF_bp);
@@ -19,60 +17,11 @@ static int uart_putchar(char c, FILE *stream)
 }
 
 void initialize() {
-  /* DIR Registers Initialization */
     /*PORTA.DIR = 0b01010001; // USART*/
     PORTA.DIR = 0b01110001; // PWM
     PORTC.DIR = 0b00001101;
     PORTD.DIR = 0b00000000;
     PORTF.DIR = 0b00000000;
-
-  /* OUT Registers Initialization */
-    PORTA.OUT = 0x0;
-    PORTC.OUT = 0x0;
-    PORTD.OUT = 0x0;
-    PORTF.OUT = 0x0;
-
-  /* PINxCTRL registers Initialization */
-    PORTA.PIN0CTRL = 0x0;
-    PORTA.PIN1CTRL = 0x0;
-    PORTA.PIN2CTRL = 0x0;
-    PORTA.PIN3CTRL = 0x0;
-    PORTA.PIN4CTRL = 0x0;
-    PORTA.PIN5CTRL = 0x0;
-    PORTA.PIN6CTRL = 0x0;
-    PORTA.PIN7CTRL = 0x0;
-    PORTC.PIN0CTRL = 0x0;
-    PORTC.PIN1CTRL = 0x0;
-    PORTC.PIN2CTRL = 0x0;
-    PORTC.PIN3CTRL = 0x0;
-    PORTC.PIN4CTRL = 0x0;
-    PORTC.PIN5CTRL = 0x0;
-    PORTC.PIN6CTRL = 0x0;
-    PORTC.PIN7CTRL = 0x0;
-    PORTD.PIN0CTRL = 0x0;
-    PORTD.PIN1CTRL = 0x0;
-    PORTD.PIN2CTRL = 0x0;
-    PORTD.PIN3CTRL = 0x0;
-    PORTD.PIN4CTRL = 0x0;
-    PORTD.PIN5CTRL = 0x0;
-    PORTD.PIN6CTRL = 0x0;
-    PORTD.PIN7CTRL = 0x0;
-    PORTF.PIN0CTRL = 0x0;
-    PORTF.PIN1CTRL = 0x0;
-    PORTF.PIN2CTRL = 0x0;
-    PORTF.PIN3CTRL = 0x0;
-    PORTF.PIN4CTRL = 0x0;
-    PORTF.PIN5CTRL = 0x0;
-    PORTF.PIN6CTRL = 0x0;
-    PORTF.PIN7CTRL = 0x0;
-
-  /* PORTMUX Initialization */
-    PORTMUX.CCLROUTEA = 0x0;
-    PORTMUX.EVSYSROUTEA = 0x0;
-    PORTMUX.TCAROUTEA = 0x0;
-    PORTMUX.TCBROUTEA = 0x0;
-    PORTMUX.TCDROUTEA = 0x4;
-    PORTMUX.TWIROUTEA = 0x0;
 
     USART0.BAUD = 138; // 115200 if F_CPU = 4MHz
     USART0.CTRLA = 0b00000000;
@@ -82,6 +31,7 @@ void initialize() {
     /*USART0.CTRLB = 0b11000000;*/
 
 
+    PORTMUX.TCDROUTEA = 0x4;
     TCD0.CMPASET = 2000;
     TCD0.CMPACLR = 2047;
     TCD0.CMPBSET = 4000;
@@ -110,16 +60,13 @@ const uint8_t flips[15][2] = {{0, 0}, {7, 9}, {5, 11}, {2, 7}, {5, 7}, {4, 13}, 
 void print_bin(uint16_t u16) {
     int i = 16;
     while(i--) {
-        uart_putchar('0' + ((u16 >> i) & 1), NULL); /* loop through and print the bits */
+        uart_putchar('0' + ((u16 >> i) & 1), NULL);
     }
 }
 
 void pwm_out_sync() {
   loop_until_bit_is_set(TCD0.STATUS, TCD_CMDRDY_bp);
   TCD0.CTRLE = 0b10;
-}
-void pwm_out(uint16_t a, uint16_t b) {
-  TCD0.CMPBSET = 4095-(b/10);
 }
 
 uint16_t flip(uint16_t pattern, uint8_t step) {
