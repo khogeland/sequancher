@@ -31,7 +31,6 @@ void initialize() {
     /*PORTMUX.USARTROUTEA = 0b00000001;*/
     /*USART0.CTRLB = 0b11000000;*/
 
-
     PORTMUX.TCDROUTEA = 0x4;
     TCD0.CMPASET = 2000;
     TCD0.CMPACLR = 2047;
@@ -61,12 +60,12 @@ void initialize() {
 
 const uint8_t flips[15][2] = {{0, 0}, {7, 9}, {5, 11}, {2, 7}, {5, 7}, {4, 13}, {1, 2}, {3, 4}, {11, 6}, {3, 0}, {3, 1}, {4, 12}, {6, 2}, {13, 5}, {3, 6}, {1, 14}};
 
-void print_bin(uint16_t u16) {
-    int i = 16;
-    while(i--) {
-        uart_putchar('0' + ((u16 >> i) & 1), NULL);
-    }
-}
+/*void print_bin(uint16_t u16) {*/
+    /*int i = 16;*/
+    /*while(i--) {*/
+        /*uart_putchar('0' + ((u16 >> i) & 1), NULL);*/
+    /*}*/
+/*}*/
 
 void pwm_out_sync() {
   loop_until_bit_is_set(TCD0.STATUS, TCD_CMDRDY_bp);
@@ -168,15 +167,6 @@ uint16_t read_adc(uint8_t muxpos) {
     ADC0.COMMAND = 0;
     return res;
 }
-uint16_t read_adc_inv(uint8_t muxpos) {
-    /*ADC0.MUXPOS = 0x7;*/
-    ADC0.MUXPOS = muxpos;
-    ADC0.COMMAND = 1;
-    loop_until_bit_is_set(ADC0.INTFLAGS, ADC_RESRDY_bp);
-    uint16_t res = ADC0.RES;
-    ADC0.COMMAND = 0;
-    return 65535-res;
-}
 
 void write_dac(uint8_t channel, uint16_t value) {
   SPI0.CTRLA = 0b00100001;
@@ -193,22 +183,18 @@ void write_dac(uint8_t channel, uint16_t value) {
   SPI0.CTRLA = 0;
 }
 
-#define MASK_GOB 1
-#define MASK_GOA 128
-
-
 uint16_t prngstate = 0;
 
-//TODO initialize state to temp sensor reading
+//TODO initialize state to temp sensor reading?
 uint16_t prng() {
-  prngstate = (2053 * prngstate + 13849) % 65536;
+  prngstate = (2053 * prngstate + 13849) % 0x10000;
   return prngstate;
 }
 
-uint16_t atten_cv_min;
-uint16_t atten_cv_range;
-uint16_t atten_rand_min;
-uint16_t atten_rand_range;
+uint16_t atten_cv_low;
+uint16_t atten_cv_high;
+uint16_t atten_rand_low;
+uint16_t atten_rand_high;
 uint16_t fade_a_min;
 uint16_t fade_a_range;
 uint16_t sample_a_min;
@@ -221,8 +207,6 @@ uint16_t pattern_b_min;
 uint16_t pattern_b_range;
 uint16_t sample_b_min;
 uint16_t sample_b_range;
-
-const DEADZONE = 0;
 
 uint16_t adjust(uint16_t reading, uint16_t min, uint16_t range) {
   uint16_t res = reading;
@@ -259,26 +243,26 @@ int main(void) {
     printf("Calibration mode babey!!!!!\n");
     _delay_ms(2000);
     while (!shift_registers_io(0xFF)) {
-      fade_a_min = read_adc_inv(AIN_FDA);
-      pattern_a_min = read_adc_inv(AIN_PTA);
-      sample_a_min = read_adc_inv(AIN_SMA);
-      fade_b_min = read_adc_inv(AIN_FDB);
-      pattern_b_min = read_adc_inv(AIN_PTB);
-      sample_b_min = read_adc_inv(AIN_SMB);
-      atten_cv_min = read_adc_inv(AIN_ACV);
-      atten_rand_min = read_adc_inv(AIN_ARD);
+      fade_a_min = read_adc(AIN_FDA);
+      pattern_a_min = read_adc(AIN_PTA);
+      sample_a_min = read_adc(AIN_SMA);
+      fade_b_min = read_adc(AIN_FDB);
+      pattern_b_min = read_adc(AIN_PTB);
+      sample_b_min = read_adc(AIN_SMB);
+      atten_cv_low = read_adc(AIN_ACV);
+      atten_rand_low = read_adc(AIN_ARD);
     }
     printf("Minimums set\n");
     _delay_ms(2000);
     while (!shift_registers_io(0x44)) {
-      fade_a_range = read_adc_inv(AIN_FDA)-fade_a_min;
-      pattern_a_range = read_adc_inv(AIN_PTA)-pattern_a_min;
-      sample_a_range = read_adc_inv(AIN_SMA)-sample_a_min;
-      fade_b_range = read_adc_inv(AIN_FDB)-fade_b_min;
-      pattern_b_range = read_adc_inv(AIN_PTB)-pattern_b_min;
-      sample_b_range = read_adc_inv(AIN_SMB)-sample_b_min;
-      atten_cv_range = read_adc_inv(AIN_ACV)-atten_cv_min;
-      atten_rand_range = read_adc_inv(AIN_ARD)-atten_rand_min;
+      fade_a_range = read_adc(AIN_FDA)-fade_a_min;
+      pattern_a_range = read_adc(AIN_PTA)-pattern_a_min;
+      sample_a_range = read_adc(AIN_SMA)-sample_a_min;
+      fade_b_range = read_adc(AIN_FDB)-fade_b_min;
+      pattern_b_range = read_adc(AIN_PTB)-pattern_b_min;
+      sample_b_range = read_adc(AIN_SMB)-sample_b_min;
+      atten_cv_high = read_adc(AIN_ACV);
+      atten_rand_high = read_adc(AIN_ARD);
     }
     printf("Maximums set\n");
     USERROW_t empty;
@@ -296,37 +280,36 @@ int main(void) {
     *((uint16_t *)(&USERROW.USERROW6)) = fade_b_min;
     *((uint16_t *)(&USERROW.USERROW8)) = pattern_b_min;
     *((uint16_t *)(&USERROW.USERROW10)) = sample_b_min;
-    *((uint16_t *)(&USERROW.USERROW12)) = atten_cv_min;
-    *((uint16_t *)(&USERROW.USERROW14)) = atten_rand_min;
+    *((uint16_t *)(&USERROW.USERROW12)) = atten_cv_low;
+    *((uint16_t *)(&USERROW.USERROW14)) = atten_rand_low;
     *((uint16_t *)(&USERROW.USERROW16)) = fade_a_range;
     *((uint16_t *)(&USERROW.USERROW18)) = pattern_a_range;
     *((uint16_t *)(&USERROW.USERROW20)) = sample_a_range;
     *((uint16_t *)(&USERROW.USERROW22)) = fade_b_range;
     *((uint16_t *)(&USERROW.USERROW24)) = pattern_b_range;
     *((uint16_t *)(&USERROW.USERROW26)) = sample_b_range;
-    *((uint16_t *)(&USERROW.USERROW28)) = atten_cv_range;
-    *((uint16_t *)(&USERROW.USERROW30)) = atten_rand_range;
+    *((uint16_t *)(&USERROW.USERROW28)) = atten_cv_high;
+    *((uint16_t *)(&USERROW.USERROW30)) = atten_rand_high;
     while (NVMCTRL.STATUS & (NVMCTRL_EEBUSY_bm | NVMCTRL_FBUSY_bm));
     _PROTECTED_WRITE_SPM(NVMCTRL.CTRLA, 0);
     printf("Calibration values saved\n");
   } else {
     fade_a_min = (*((uint16_t *) &USERROW.USERROW0));
-    /*fade_a_min = (*((uint16_t *) &USERROW.USERROW0))+DEADZONE;*/
-    pattern_a_min = (*((uint16_t *) &USERROW.USERROW2))+DEADZONE;
-    sample_a_min = (*((uint16_t *) &USERROW.USERROW4))+DEADZONE;
-    fade_b_min = (*((uint16_t *) &USERROW.USERROW6))+DEADZONE;
-    pattern_b_min = (*((uint16_t *) &USERROW.USERROW8))+DEADZONE;
-    sample_b_min = (*((uint16_t *) &USERROW.USERROW10))+DEADZONE;
-    atten_cv_min = (*((uint16_t *) &USERROW.USERROW12))+DEADZONE;
-    atten_rand_min = (*((uint16_t *) &USERROW.USERROW14))+DEADZONE;
-    fade_a_range = (*((uint16_t *) &USERROW.USERROW16))-DEADZONE*2;
-    pattern_a_range = (*((uint16_t *) &USERROW.USERROW18))-DEADZONE*2;
-    sample_a_range = (*((uint16_t *) &USERROW.USERROW20))-DEADZONE*2;
-    fade_b_range = (*((uint16_t *) &USERROW.USERROW22))-DEADZONE*2;
-    pattern_b_range = (*((uint16_t *) &USERROW.USERROW24))-DEADZONE*2;
-    sample_b_range = (*((uint16_t *) &USERROW.USERROW26))-DEADZONE*2;
-    atten_cv_range = (*((uint16_t *) &USERROW.USERROW28))-DEADZONE*2;
-    atten_rand_range = (*((uint16_t *) &USERROW.USERROW30))-DEADZONE*2;
+    pattern_a_min = (*((uint16_t *) &USERROW.USERROW2));
+    sample_a_min = (*((uint16_t *) &USERROW.USERROW4));
+    fade_b_min = (*((uint16_t *) &USERROW.USERROW6));
+    pattern_b_min = (*((uint16_t *) &USERROW.USERROW8));
+    sample_b_min = (*((uint16_t *) &USERROW.USERROW10));
+    atten_cv_low = (*((uint16_t *) &USERROW.USERROW12));
+    atten_rand_low = (*((uint16_t *) &USERROW.USERROW14));
+    fade_a_range = (*((uint16_t *) &USERROW.USERROW16));
+    pattern_a_range = (*((uint16_t *) &USERROW.USERROW18));
+    sample_a_range = (*((uint16_t *) &USERROW.USERROW20));
+    fade_b_range = (*((uint16_t *) &USERROW.USERROW22));
+    pattern_b_range = (*((uint16_t *) &USERROW.USERROW24));
+    sample_b_range = (*((uint16_t *) &USERROW.USERROW26));
+    atten_cv_high = (*((uint16_t *) &USERROW.USERROW28));
+    atten_rand_high = (*((uint16_t *) &USERROW.USERROW30));
   }
   uint16_t fade_a_div = fade_a_range/17;
   uint16_t fade_b_div = fade_b_range/17;
@@ -345,7 +328,15 @@ int main(void) {
 
   uint16_t cv_in_a_norm = 0;
   uint8_t lfo_up = 1;
-  
+
+  // allows mounting the module upside down and handles upside down pots
+  uint8_t invert_atten_cv = atten_cv_high < atten_cv_low; 
+  uint8_t invert_atten_rand = atten_rand_high < atten_rand_low; 
+  uint16_t atten_cv_min = invert_atten_cv ? atten_cv_high : atten_cv_low;
+  uint16_t atten_cv_range = invert_atten_cv ? atten_cv_low - atten_cv_high : atten_cv_high - atten_cv_low;
+  uint16_t atten_rand_min = invert_atten_rand ? atten_rand_high : atten_rand_low;
+  uint16_t atten_rand_range = invert_atten_rand ? atten_rand_low - atten_rand_high : atten_rand_high - atten_rand_low;
+
   while (1) {
     if (cv_in_a_norm == 0xFFFF) {
       lfo_up = 0;
@@ -407,9 +398,16 @@ int main(void) {
     uint16_t fade_b = adjust(read_adc(AIN_FDB), fade_b_min, fade_b_range);
     uint16_t pattern_b = adjust(read_adc(AIN_PTB), pattern_b_min, pattern_b_range);
     uint16_t sample_b = adjust(read_adc(AIN_SMB), sample_b_min, sample_b_range);
-    // these ones are upside down
-    uint16_t atten_cv = adjust(read_adc_inv(AIN_ACV), atten_cv_min, atten_cv_range);
-    uint16_t atten_rand = adjust(read_adc_inv(AIN_ARD), atten_rand_min, atten_rand_range);
+    uint16_t atten_cv = read_adc(AIN_ACV);
+    if (invert_atten_cv) {
+      atten_cv = 0xFFFF - atten_cv;
+    }
+    atten_cv = adjust(atten_cv, atten_cv_min, atten_cv_range);
+    uint16_t atten_rand = read_adc(AIN_ARD);
+    if (invert_atten_rand) {
+      atten_rand = 0xFFFF - atten_rand;
+    }
+    atten_rand = adjust(atten_rand, atten_rand_min, atten_rand_range);
     uint8_t buttons = shift_registers_io(shift_out);
     uint8_t btn_zero_b = buttons & 1;
     uint8_t btn_hold_b = (buttons >> 1) & 1;
@@ -607,7 +605,6 @@ int main(void) {
 
     /*printf("%u %u %u", index, out_a, out_b);*/
     /*printf("[A] %u + %u\n", state.seqA_start, index_a);*/
-
 
     // save when either sequence is at zero and something has happened since last save
     if (advanced & ((!seqB_idx) | !(seqA_idx)) & !save_bytes_left) {
