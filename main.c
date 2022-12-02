@@ -513,7 +513,6 @@ int main(void) {
     uint16_t cv_in_b = read_adc(AIN_CVB) * cv_pct;
 
     if (process_a) {
-      // address off by one..? full 12 bit value does not work
       TCD0.CMPASET = 2047-(cv_in_a >> 5);
       shift_out = shift_out & ~LED_A_F & ~LED_A_P & ~LED_A_S & ~GATE_A;
       shift_out = shift_out | (a_lr ? (LED_A_F | GATE_A) : LED_A_P);
@@ -559,7 +558,6 @@ int main(void) {
     }
 
     if (process_b) {
-      // shift extra place for consistency I guess
       TCD0.CMPBSET = 4095-(cv_in_b >> 5);
       shift_out = shift_out & ~LED_B_F & ~LED_B_P & ~LED_B_S & ~GATE_B;
       shift_out = shift_out | (b_lr ? (LED_B_F | GATE_B) : LED_B_P);
