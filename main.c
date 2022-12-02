@@ -2,6 +2,7 @@
 #define F_CPU 4000000UL
 
 #include <avr/io.h>
+#include <avr/eeprom.h>
 #include <stdio.h>
 #include <util/delay.h>
 
@@ -43,9 +44,12 @@ void initialize() {
     TCD0.CTRLA=1;
 
     VREF.ADC0REF = 0x5; // Vdd
+    VREF.DAC0REF = 0x5; // Vdd
 
     ADC0.CTRLB = 0x4;
     ADC0.CTRLA = 0b1;
+
+    DAC0.CTRLA = 0b01000001;
 
     PORTMUX.SPIROUTEA = 0x3;
     SPI0.CTRLB = 0b00000100;
@@ -147,11 +151,11 @@ uint8_t shift_registers_io(uint8_t out) {
 #define AIN_SMB 16 
 
 #define GATE_B  0b10000000
-#define LED_A_F 0b01000000
-#define LED_A_P 0b00100000
+#define LED_A_F 0b00100000
+#define LED_A_P 0b01000000
 #define LED_A_S 0b00010000
-#define LED_B_F 0b00001000
-#define LED_B_P 0b00000100
+#define LED_B_F 0b00000100
+#define LED_B_P 0b00001000
 #define LED_B_S 0b00000010
 #define GATE_A  0b00000001
 
@@ -193,12 +197,12 @@ void write_dac(uint8_t channel, uint16_t value) {
 #define MASK_GOA 128
 
 
-uint16_t state = 0;
+uint16_t prngstate = 0;
 
 //TODO initialize state to temp sensor reading
 uint16_t prng() {
-  state = (2053 * state + 13849) % 65536;
-  return state;
+  prngstate = (2053 * prngstate + 13849) % 65536;
+  return prngstate;
 }
 
 uint16_t atten_cv_min;
@@ -234,16 +238,20 @@ uint16_t adjust(uint16_t reading, uint16_t min, uint16_t range) {
   return res;
 }
 
-int main(void) {
-  initialize();
-  uint8_t seqA_start = 0;
-  uint8_t seqB_start = 0;
+//TODO: if corruption becomes a noticeable issue, find some more storage and swap writes between two locations
+struct seqstate {
+  uint8_t seqA_start;
+  uint8_t seqB_start;
   uint16_t seqAL[16]; 
   uint16_t seqAR[16]; 
   uint16_t seqBL[16]; 
   uint16_t seqBR[16]; 
-  uint8_t index_a = 0;
-  uint8_t index_b = 0;
+  uint8_t index_a;
+  uint8_t index_b;
+} state;
+
+int main(void) {
+  initialize();
   uint8_t shift_out = 0;
   uint8_t clocklow_a = 0;
   uint8_t clocklow_b = 0;
@@ -326,7 +334,30 @@ int main(void) {
   uint16_t sample_b_div = sample_b_range/17;
   uint16_t pattern_a_div = pattern_a_range/31;
   uint16_t pattern_b_div = pattern_b_range/31;
+
+  volatile struct seqstate save_buffer_data;
+  volatile uint8_t * save_buffer = &state;
+  const state_size = sizeof(struct seqstate);
+  uint8_t save_bytes_left = 0;
+  uint8_t advanced = 0;
+
+  eeprom_read_block(&state, 0, state_size);
+
+  uint16_t cv_in_a_norm = 0;
+  uint8_t lfo_up = 1;
+  
   while (1) {
+    if (cv_in_a_norm == 0xFFFF) {
+      lfo_up = 0;
+    } else if (!cv_in_a_norm) {
+      lfo_up = 1;
+    }
+    if (lfo_up) {
+      cv_in_a_norm++;
+    } else {
+      cv_in_a_norm--;
+    }
+    DAC0.DATA = cv_in_a_norm;
     uint16_t random_a = prng();
     /*printf("hi lol\n");*/
     uint8_t clock_a = (PORTC.IN >> 1) & 1;
@@ -352,21 +383,31 @@ int main(void) {
       /*printf("CA:%u CB:%u R:%u PA:%u PB:%u\n", clock_a, clock_b, reset, process_a, process_b);*/
     /*}*/
     if (!(process_a | process_b)) {
+
+      // every time around that we aren't processing, save the next byte of the state 
+      // this allows the saving to be interrupted by the sequencer
+      if (!(NVMCTRL.STATUS & (NVMCTRL_EEBUSY_bm | NVMCTRL_FBUSY_bm)) & save_bytes_left > 0) {
+        uint8_t offset = state_size - save_bytes_left;
+        unsigned char this_byte = save_buffer[offset];
+        eeprom_update_byte(offset, this_byte);
+        save_bytes_left--;
+      }
       continue;
     }
     if (reset && process_a) {
-        index_a = 0;
+        state.index_a = 0;
     }
     if (reset && process_b) {
-        index_b = 0;
+        state.index_b = 0;
     }
-    // inputs (are phase inverted oops)
-    uint16_t fade_a = adjust(read_adc_inv(AIN_FDA), fade_a_min, fade_a_range);
-    uint16_t pattern_a = adjust(read_adc_inv(AIN_PTA), pattern_a_min, pattern_a_range);
-    uint16_t sample_a = adjust(read_adc_inv(AIN_SMA), sample_a_min, sample_a_range);
-    uint16_t fade_b = adjust(read_adc_inv(AIN_FDB), fade_b_min, fade_b_range);
-    uint16_t pattern_b = adjust(read_adc_inv(AIN_PTB), pattern_b_min, pattern_b_range);
-    uint16_t sample_b = adjust(read_adc_inv(AIN_SMB), sample_b_min, sample_b_range);
+    // inputs
+    uint16_t fade_a = adjust(read_adc(AIN_FDA), fade_a_min, fade_a_range);
+    uint16_t pattern_a = adjust(read_adc(AIN_PTA), pattern_a_min, pattern_a_range);
+    uint16_t sample_a = adjust(read_adc(AIN_SMA), sample_a_min, sample_a_range);
+    uint16_t fade_b = adjust(read_adc(AIN_FDB), fade_b_min, fade_b_range);
+    uint16_t pattern_b = adjust(read_adc(AIN_PTB), pattern_b_min, pattern_b_range);
+    uint16_t sample_b = adjust(read_adc(AIN_SMB), sample_b_min, sample_b_range);
+    // these ones are upside down
     uint16_t atten_cv = adjust(read_adc_inv(AIN_ACV), atten_cv_min, atten_cv_range);
     uint16_t atten_rand = adjust(read_adc_inv(AIN_ARD), atten_rand_min, atten_rand_range);
     uint8_t buttons = shift_registers_io(shift_out);
@@ -379,8 +420,12 @@ int main(void) {
     uint8_t btn_hold_a = (buttons >> 6) & 1;
     uint8_t btn_zero_a = (buttons >> 7) & 1;
 
-    uint8_t seqA_idx = (seqA_start + index_a) % 16;
-    uint8_t seqB_idx = (seqB_start + index_b) % 16;
+    uint8_t seqA_idx = (state.seqA_start + state.index_a) % 16;
+    uint8_t seqB_idx = (state.seqB_start + state.index_b) % 16;
+
+    if (seqA_idx | seqB_idx) {
+      advanced = 1;
+    }
 
     uint8_t fade_quant_a = fade_a / fade_a_div;
     if (fade_quant_a > 16) {
@@ -439,10 +484,10 @@ int main(void) {
     uint16_t flipped_sample_a = flip(unflipped_sample_a, 30-step_a);
     uint16_t flipped_sample_b = flip(unflipped_sample_b, 30-step_b);
 
-    uint8_t a_lr = (flipped_a >> index_a) & 1;
-    uint8_t b_lr = (flipped_b >> index_b) & 1;
-    uint8_t a_sampling = ((flipped_sample_a >> index_a) & 1) | btn_sample_a;
-    uint8_t b_sampling = ((flipped_sample_b >> index_b) & 1) | btn_sample_b;
+    uint8_t a_lr = (flipped_a >> state.index_a) & 1;
+    uint8_t b_lr = (flipped_b >> state.index_b) & 1;
+    uint8_t a_sampling = ((flipped_sample_a >> state.index_a) & 1) | btn_sample_a;
+    uint8_t b_sampling = ((flipped_sample_b >> state.index_b) & 1) | btn_sample_b;
 
     /*shift_out = shift_out & 0b01111110;*/
 
@@ -479,7 +524,7 @@ int main(void) {
             unflipped_sample_a = (unflipped_sample_a >> 1) | 32768;
           }
           unflipped_sample_a = unflipped_sample_a & 0b1011111111101111;
-          if ((flip(unflipped_sample_a, 30-step_a) >> index_a) & 1) {
+          if ((flip(unflipped_sample_a, 30-step_a) >> state.index_a) & 1) {
             out_a = cv_in_a;
           } else {
             out_a = random_a;
@@ -492,23 +537,23 @@ int main(void) {
       } else if (btn_zero_a) {
         out_a = atten_rand;
       } else {
-        out_a = a_lr ? seqAL[seqA_idx] : seqAR[seqA_idx];
+        out_a = a_lr ? state.seqAL[seqA_idx] : state.seqAR[seqA_idx];
       }
 
       write_dac(0, out_a);
 
       if (a_lr) {
-        seqAL[seqA_idx] = out_a;
+        state.seqAL[seqA_idx] = out_a;
       } else {
-        seqAR[seqA_idx] = out_a;
+        state.seqAR[seqA_idx] = out_a;
       }
 
-      index_a = (index_a + 1) % 16;
+      state.index_a = (state.index_a + 1) % 16;
       if (btn_hold_a) {
-        if (seqA_start == 0) {
-          seqA_start = 16;
+        if (state.seqA_start == 0) {
+          state.seqA_start = 16;
         } else {
-          seqA_start--;
+          state.seqA_start--;
         }
       }
     }
@@ -525,7 +570,7 @@ int main(void) {
             unflipped_sample_b = (unflipped_sample_b >> 1) | 32768;
           }
           unflipped_sample_b = unflipped_sample_b & 0b1011111111101111;
-          if ((flip(unflipped_sample_b, 30-step_b) >> index_b) & 1) {
+          if ((flip(unflipped_sample_b, 30-step_b) >> state.index_b) & 1) {
             out_b = cv_in_b;
           } else {
             out_b = random_b;
@@ -538,23 +583,23 @@ int main(void) {
       } else if (btn_zero_b) {
         out_b = atten_rand;
       } else {
-        out_b = b_lr ? seqBL[seqB_idx] : seqBR[seqB_idx];
+        out_b = b_lr ? state.seqBL[seqB_idx] : state.seqBR[seqB_idx];
       }
 
       write_dac(1, out_b);
 
       if (b_lr) {
-        seqBL[seqB_idx] = out_b;
+        state.seqBL[seqB_idx] = out_b;
       } else {
-        seqBR[seqB_idx] = out_b;
+        state.seqBR[seqB_idx] = out_b;
       }
 
-      index_b = (index_b + 1) % 16;
+      state.index_b = (state.index_b + 1) % 16;
       if (btn_hold_b) {
-        if (seqB_start == 0) {
-          seqB_start = 16;
+        if (state.seqB_start == 0) {
+          state.seqB_start = 16;
         } else {
-          seqB_start--;
+          state.seqB_start--;
         }
       }
     }
@@ -563,6 +608,14 @@ int main(void) {
     shift_registers_io(shift_out);
 
     /*printf("%u %u %u", index, out_a, out_b);*/
-    /*printf("[A] %u + %u\n", seqA_start, index_a);*/
+    /*printf("[A] %u + %u\n", state.seqA_start, index_a);*/
+
+
+    // save when either sequence is at zero and something has happened since last save
+    if (advanced & ((!seqB_idx) | !(seqA_idx)) & !save_bytes_left) {
+      advanced = 0;
+      save_bytes_left = state_size;
+      save_buffer_data = state;
+    }
   }
 }
