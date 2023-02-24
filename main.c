@@ -74,11 +74,13 @@ void pwm_out_sync() {
 }
 
 const float unit_semitone = 4095.0/60.0;
+uint16_t semitone_lut[61];
 
 uint16_t quantize_semitone(uint16_t value) {
   float pct = ((float) value) / 4095.0;
-  float index = (floor(pct * 60.0))
-  return (uint16_t) floor(index * unit_semitone);
+  uint16_t index = lround(pct * 60.0);
+  return value;
+  /*return semitone_lut[index];*/
 }
 
 uint16_t flip(uint16_t pattern, uint8_t step) {
@@ -346,6 +348,11 @@ int main(void) {
   uint16_t atten_rand_min = invert_atten_rand ? atten_rand_high : atten_rand_low;
   uint16_t atten_rand_range = invert_atten_rand ? atten_rand_low - atten_rand_high : atten_rand_high - atten_rand_low;
 
+  // TODO this should be compile time but that seems difficult in C?
+  for (uint8_t i = 0; i <= 60; i++) {
+    semitone_lut[i] = lround(i * unit_semitone);
+  }
+
   while (1) {
     if (cv_in_a_norm == 0xFFFF) {
       lfo_up = 0;
@@ -403,10 +410,10 @@ int main(void) {
     // inputs
     uint16_t fade_a = adjust(read_adc(AIN_FDA), fade_a_min, fade_a_range);
     uint16_t pattern_a = adjust(read_adc(AIN_PTA), pattern_a_min, pattern_a_range);
-    uint16_t sample_a = adjust(read_adc(AIN_SMA), sample_a_min, sample_a_range);
+    /*uint16_t sample_a = adjust(read_adc(AIN_SMA), sample_a_min, sample_a_range);*/
     uint16_t fade_b = adjust(read_adc(AIN_FDB), fade_b_min, fade_b_range);
     uint16_t pattern_b = adjust(read_adc(AIN_PTB), pattern_b_min, pattern_b_range);
-    uint16_t sample_b = adjust(read_adc(AIN_SMB), sample_b_min, sample_b_range);
+    /*uint16_t sample_b = adjust(read_adc(AIN_SMB), sample_b_min, sample_b_range);*/
     uint16_t atten_cv = read_adc(AIN_ACV);
     if (invert_atten_cv) {
       atten_cv = 0xFFFF - atten_cv;
@@ -419,13 +426,18 @@ int main(void) {
     atten_rand = adjust(atten_rand, atten_rand_min, atten_rand_range);
     uint8_t buttons = shift_registers_io(shift_out);
     uint8_t btn_zero_b = buttons & 1;
-    uint8_t btn_hold_b = (buttons >> 1) & 1;
+    /*uint8_t btn_hold_b = (buttons >> 1) & 1;*/
     uint8_t btn_sample_b = (buttons >> 2) & 1;
     uint8_t btn_rand_b = (buttons >> 3) & 1;
     uint8_t btn_rand_a = (buttons >> 4) & 1;
     uint8_t btn_sample_a = (buttons >> 5) & 1;
-    uint8_t btn_hold_a = (buttons >> 6) & 1;
+    /*uint8_t btn_hold_a = (buttons >> 6) & 1;*/
     uint8_t btn_zero_a = (buttons >> 7) & 1;
+
+    uint8_t sampling_a = btn_sample_a; //TODO gate
+    uint8_t sampling_b = btn_sample_b; //TODO gate
+    uint8_t sample_ext_a = 0; // 0 = internal, 1 = external
+    uint8_t sample_ext_b = 0; // 0 = internal, 1 = external
 
     uint8_t seqA_idx = (state.seqA_start + state.index_a) % 16;
     uint8_t seqB_idx = (state.seqB_start + state.index_b) % 16;
@@ -441,14 +453,6 @@ int main(void) {
     uint8_t fade_quant_b = fade_b / fade_b_div;
     if (fade_quant_b > 16) {
       fade_quant_b = 16;
-    }
-    uint8_t sample_quant_a = sample_a / sample_a_div;
-    if (sample_quant_a > 16) {
-      sample_quant_a = 16;
-    }
-    uint8_t sample_quant_b = sample_b / sample_b_div;
-    if (sample_quant_b > 16) {
-      sample_quant_b = 16;
     }
     uint8_t step_a = pattern_a / pattern_a_div;
     if (step_a > 30) {
@@ -467,8 +471,6 @@ int main(void) {
 
     uint16_t unflipped_a = 0;
     uint16_t unflipped_b = 0;
-    uint16_t unflipped_sample_a = 0;
-    uint16_t unflipped_sample_b = 0;
     for (uint8_t i = 0; i < 16; i++) {
       if (i < fade_quant_a) {
         unflipped_a = (unflipped_a << 1) | 1;
@@ -476,25 +478,15 @@ int main(void) {
       if (i < fade_quant_b) {
         unflipped_b = (unflipped_b << 1) | 1;
       }
-      if (i < sample_quant_a) {
-        unflipped_sample_a = (unflipped_sample_a >> 1) | 32768;
-      }
-      if (i < sample_quant_b) {
-        unflipped_sample_b = (unflipped_sample_b >> 1) | 32768;
-      }
     }
 
     // I think I want to do the unnecessary slow steps even when one side isn't clocked
     // to keep latency consistent for easier syncing with external modules
     uint16_t flipped_a = flip(unflipped_a, step_a);
     uint16_t flipped_b = flip(unflipped_b, step_b);
-    uint16_t flipped_sample_a = flip(unflipped_sample_a, 30-step_a);
-    uint16_t flipped_sample_b = flip(unflipped_sample_b, 30-step_b);
 
     uint8_t a_lr = (flipped_a >> state.index_a) & 1;
     uint8_t b_lr = (flipped_b >> state.index_b) & 1;
-    uint8_t a_sampling = ((flipped_sample_a >> state.index_a) & 1) | btn_sample_a;
-    uint8_t b_sampling = ((flipped_sample_b >> state.index_b) & 1) | btn_sample_b;
 
     /*shift_out = shift_out & 0b01111110;*/
 
@@ -523,20 +515,10 @@ int main(void) {
       TCD0.CMPASET = 2047-(cv_in_a >> 5);
       shift_out = shift_out & ~LED_A_F & ~LED_A_P & ~LED_A_S & ~GATE_A;
       shift_out = shift_out | (a_lr ? (LED_A_F | GATE_A) : LED_A_P);
-      if (a_sampling) {
+      if (sampling_a) {
         shift_out = shift_out | LED_A_S; 
-        if (btn_rand_a) {
-          for (uint8_t i = 0; i < 8; i++){
-            unflipped_sample_a = (unflipped_sample_a >> 1) | 32768;
-          }
-          unflipped_sample_a = unflipped_sample_a & 0b1011111111101111;
-          if ((flip(unflipped_sample_a, 30-step_a) >> state.index_a) & 1) {
-            out_a = quantize_semitone(cv_in_a);
-          } else {
-            out_a = quantize_semitone(random_a);
-          }
-        } else {
-            out_a = quantize_semitone(cv_in_a);
+        if (sample_ext_a) {
+          out_a = quantize_semitone(cv_in_a);
         }
       } else if (btn_rand_a) {
         out_a = quantize_semitone(random_a);
@@ -545,7 +527,40 @@ int main(void) {
       } else {
         out_a = a_lr ? state.seqAL[seqA_idx] : state.seqAR[seqA_idx];
       }
+    }
 
+    if (process_b) {
+      TCD0.CMPBSET = 4095-(cv_in_b >> 5);
+      shift_out = shift_out & ~LED_B_F & ~LED_B_P & ~LED_B_S & ~GATE_B;
+      shift_out = shift_out | (b_lr ? (LED_B_F | GATE_B) : LED_B_P);
+      if (sampling_b) {
+        shift_out = shift_out | LED_B_S; 
+        if (sample_ext_b) {
+          out_b = quantize_semitone(cv_in_b);
+        }
+      } else if (btn_rand_b) {
+        out_b = quantize_semitone(random_b);
+      } else if (btn_zero_b) {
+        out_b = quantize_semitone(atten_rand);
+      } else {
+        out_b = b_lr ? state.seqBL[seqB_idx] : state.seqBR[seqB_idx];
+      }
+    }
+
+    if (process_a && sampling_a && !(sample_ext_a)) {
+      // sampling each other, swap
+      if (process_b && sampling_b && !(sample_ext_b)) {
+        uint16_t temp = out_a;
+        out_a = quantize_semitone(out_b * cv_pct);
+        out_b = quantize_semitone(temp * cv_pct);
+      } else {
+        out_a = quantize_semitone(out_b * cv_pct);
+      }
+    } else if (process_b && sampling_b && !(sample_ext_b)) {
+      out_b = quantize_semitone(out_a * cv_pct);
+    }
+
+    if (process_a) {
       write_dac(0, out_a);
 
       if (a_lr) {
@@ -555,42 +570,9 @@ int main(void) {
       }
 
       state.index_a = (state.index_a + 1) % 16;
-      if (btn_hold_a) {
-        if (state.seqA_start == 0) {
-          state.seqA_start = 16;
-        } else {
-          state.seqA_start--;
-        }
-      }
     }
 
     if (process_b) {
-      TCD0.CMPBSET = 4095-(cv_in_b >> 5);
-      shift_out = shift_out & ~LED_B_F & ~LED_B_P & ~LED_B_S & ~GATE_B;
-      shift_out = shift_out | (b_lr ? (LED_B_F | GATE_B) : LED_B_P);
-      if (b_sampling) {
-        shift_out = shift_out | LED_B_S; 
-        if (btn_rand_b) {
-          for (uint8_t i = 0; i < 8; i++) {
-            unflipped_sample_b = (unflipped_sample_b >> 1) | 32768;
-          }
-          unflipped_sample_b = unflipped_sample_b & 0b1011111111101111;
-          if ((flip(unflipped_sample_b, 30-step_b) >> state.index_b) & 1) {
-            out_b = quantize_semitone(cv_in_b);
-          } else {
-            out_b = quantize_semitone(random_b);
-          }
-        } else {
-            out_b = quantize_semitone(cv_in_b);
-        }
-      } else if (btn_rand_b) {
-        out_b = quantize_semitone(random_b);
-      } else if (btn_zero_b) {
-        out_b = quantize_semitone(atten_rand);
-      } else {
-        out_b = b_lr ? state.seqBL[seqB_idx] : state.seqBR[seqB_idx];
-      }
-
       write_dac(1, out_b);
 
       if (b_lr) {
@@ -600,13 +582,6 @@ int main(void) {
       }
 
       state.index_b = (state.index_b + 1) % 16;
-      if (btn_hold_b) {
-        if (state.seqB_start == 0) {
-          state.seqB_start = 16;
-        } else {
-          state.seqB_start--;
-        }
-      }
     }
 
     pwm_out_sync();
