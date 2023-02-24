@@ -5,6 +5,7 @@
 #include <avr/eeprom.h>
 #include <stdio.h>
 #include <util/delay.h>
+#include <math.h>
 
 static int uart_putchar(char c, FILE *stream);
 static FILE mystdout = FDEV_SETUP_STREAM(uart_putchar, NULL, _FDEV_SETUP_WRITE);
@@ -70,6 +71,14 @@ const uint8_t flips[15][2] = {{0, 0}, {7, 9}, {5, 11}, {2, 7}, {5, 7}, {4, 13}, 
 void pwm_out_sync() {
   loop_until_bit_is_set(TCD0.STATUS, TCD_CMDRDY_bp);
   TCD0.CTRLE = 0b10;
+}
+
+const float unit_semitone = 4095.0/60.0;
+
+uint16_t quantize_semitone(uint16_t value) {
+  float pct = ((float) value) / 4095.0;
+  float index = (floor(pct * 60.0))
+  return (uint16_t) floor(index * unit_semitone);
 }
 
 uint16_t flip(uint16_t pattern, uint8_t step) {
@@ -522,17 +531,17 @@ int main(void) {
           }
           unflipped_sample_a = unflipped_sample_a & 0b1011111111101111;
           if ((flip(unflipped_sample_a, 30-step_a) >> state.index_a) & 1) {
-            out_a = cv_in_a;
+            out_a = quantize_semitone(cv_in_a);
           } else {
-            out_a = random_a;
+            out_a = quantize_semitone(random_a);
           }
         } else {
-            out_a = cv_in_a;
+            out_a = quantize_semitone(cv_in_a);
         }
       } else if (btn_rand_a) {
-        out_a = random_a;
+        out_a = quantize_semitone(random_a);
       } else if (btn_zero_a) {
-        out_a = atten_rand;
+        out_a = quantize_semitone(atten_rand);
       } else {
         out_a = a_lr ? state.seqAL[seqA_idx] : state.seqAR[seqA_idx];
       }
@@ -567,17 +576,17 @@ int main(void) {
           }
           unflipped_sample_b = unflipped_sample_b & 0b1011111111101111;
           if ((flip(unflipped_sample_b, 30-step_b) >> state.index_b) & 1) {
-            out_b = cv_in_b;
+            out_b = quantize_semitone(cv_in_b);
           } else {
-            out_b = random_b;
+            out_b = quantize_semitone(random_b);
           }
         } else {
-            out_b = cv_in_b;
+            out_b = quantize_semitone(cv_in_b);
         }
       } else if (btn_rand_b) {
-        out_b = random_b;
+        out_b = quantize_semitone(random_b);
       } else if (btn_zero_b) {
-        out_b = atten_rand;
+        out_b = quantize_semitone(atten_rand);
       } else {
         out_b = b_lr ? state.seqBL[seqB_idx] : state.seqBR[seqB_idx];
       }
