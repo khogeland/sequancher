@@ -73,14 +73,19 @@ void pwm_out_sync() {
   TCD0.CTRLE = 0b10;
 }
 
-const float unit_semitone = 4095.0/60.0;
-uint16_t semitone_lut[61];
+// response curve seems linear enough for this to work
+const float scale_factor_a = (5.0/5.10);
+const float scale_factor_b = (5.0/5.12);
+
+const float unit_semitone = 65535.0/60.0;
+// TODO do I even care
+/*uint16_t semitone_lut[61];*/
 
 uint16_t quantize_semitone(uint16_t value) {
-  float pct = ((float) value) / 4095.0;
+  float pct = ((float) value) / 65535.0;
   uint16_t index = lround(pct * 60.0);
-  return value;
   /*return semitone_lut[index];*/
+  return lround(index * unit_semitone);
 }
 
 uint16_t flip(uint16_t pattern, uint8_t step) {
@@ -348,11 +353,6 @@ int main(void) {
   uint16_t atten_rand_min = invert_atten_rand ? atten_rand_high : atten_rand_low;
   uint16_t atten_rand_range = invert_atten_rand ? atten_rand_low - atten_rand_high : atten_rand_high - atten_rand_low;
 
-  // TODO this should be compile time but that seems difficult in C?
-  for (uint8_t i = 0; i <= 60; i++) {
-    semitone_lut[i] = lround(i * unit_semitone);
-  }
-
   while (1) {
     if (cv_in_a_norm == 0xFFFF) {
       lfo_up = 0;
@@ -410,10 +410,10 @@ int main(void) {
     // inputs
     uint16_t fade_a = adjust(read_adc(AIN_FDA), fade_a_min, fade_a_range);
     uint16_t pattern_a = adjust(read_adc(AIN_PTA), pattern_a_min, pattern_a_range);
-    /*uint16_t sample_a = adjust(read_adc(AIN_SMA), sample_a_min, sample_a_range);*/
+    uint16_t sample_a = adjust(read_adc(AIN_SMA), sample_a_min, sample_a_range);
     uint16_t fade_b = adjust(read_adc(AIN_FDB), fade_b_min, fade_b_range);
     uint16_t pattern_b = adjust(read_adc(AIN_PTB), pattern_b_min, pattern_b_range);
-    /*uint16_t sample_b = adjust(read_adc(AIN_SMB), sample_b_min, sample_b_range);*/
+    uint16_t sample_b = adjust(read_adc(AIN_SMB), sample_b_min, sample_b_range);
     uint16_t atten_cv = read_adc(AIN_ACV);
     if (invert_atten_cv) {
       atten_cv = 0xFFFF - atten_cv;
@@ -427,17 +427,20 @@ int main(void) {
     uint8_t buttons = shift_registers_io(shift_out);
     uint8_t btn_zero_b = buttons & 1;
     /*uint8_t btn_hold_b = (buttons >> 1) & 1;*/
+    uint8_t btn_sample_internal_b = (buttons >> 1) & 1;
     uint8_t btn_sample_b = (buttons >> 2) & 1;
     uint8_t btn_rand_b = (buttons >> 3) & 1;
     uint8_t btn_rand_a = (buttons >> 4) & 1;
     uint8_t btn_sample_a = (buttons >> 5) & 1;
+    uint8_t btn_sample_internal_a = (buttons >> 6) & 1;
     /*uint8_t btn_hold_a = (buttons >> 6) & 1;*/
     uint8_t btn_zero_a = (buttons >> 7) & 1;
 
-    uint8_t sampling_a = btn_sample_a; //TODO gate
-    uint8_t sampling_b = btn_sample_b; //TODO gate
-    uint8_t sample_ext_a = 0; // 0 = internal, 1 = external
-    uint8_t sample_ext_b = 0; // 0 = internal, 1 = external
+    uint8_t sampling_a = btn_sample_a | btn_sample_internal_a | (sample_a > 50000); //TODO hw changes
+    uint8_t sampling_b = btn_sample_b | btn_sample_internal_b | (sample_b > 50000); //TODO 
+    uint8_t sample_ext_a = !btn_sample_internal_a; // 0 = internal, 1 = external
+    uint8_t sample_ext_b = btn_sample_b; // 0 = internal, 1 = external
+    /*uint8_t sample_ext_b = !btn_sample_internal_b; // 0 = internal, 1 = external*/
 
     uint8_t seqA_idx = (state.seqA_start + state.index_a) % 16;
     uint8_t seqB_idx = (state.seqB_start + state.index_b) % 16;
@@ -490,8 +493,8 @@ int main(void) {
 
     /*shift_out = shift_out & 0b01111110;*/
 
-    float rand_pct = ((float)atten_rand) / atten_rand_range;
-    float cv_pct = ((float)atten_cv) / atten_rand_range;
+    float rand_pct = fmin(0.9999999, ((float)atten_rand) / atten_rand_range);
+    float cv_pct = fmin(0.9999999, ((float)atten_cv) / atten_rand_range);
     uint16_t random_b = 0;
     if (btn_rand_b) {
       random_b = prng();
@@ -517,9 +520,9 @@ int main(void) {
       shift_out = shift_out | (a_lr ? (LED_A_F | GATE_A) : LED_A_P);
       if (sampling_a) {
         shift_out = shift_out | LED_A_S; 
-        if (sample_ext_a) {
-          out_a = quantize_semitone(cv_in_a);
-        }
+      }
+      if (sampling_a && sample_ext_a) {
+        out_a = quantize_semitone(cv_in_a);
       } else if (btn_rand_a) {
         out_a = quantize_semitone(random_a);
       } else if (btn_zero_a) {
@@ -535,9 +538,9 @@ int main(void) {
       shift_out = shift_out | (b_lr ? (LED_B_F | GATE_B) : LED_B_P);
       if (sampling_b) {
         shift_out = shift_out | LED_B_S; 
-        if (sample_ext_b) {
+      }
+      if (sampling_b && sample_ext_b) {
           out_b = quantize_semitone(cv_in_b);
-        }
       } else if (btn_rand_b) {
         out_b = quantize_semitone(random_b);
       } else if (btn_zero_b) {
@@ -561,7 +564,7 @@ int main(void) {
     }
 
     if (process_a) {
-      write_dac(0, out_a);
+      write_dac(0, out_a * scale_factor_a);
 
       if (a_lr) {
         state.seqAL[seqA_idx] = out_a;
@@ -573,7 +576,10 @@ int main(void) {
     }
 
     if (process_b) {
-      write_dac(1, out_b);
+      write_dac(1, out_b * scale_factor_b);
+      /*uint16_t out_val = cv_pct > 1 ? 65535 : 0;*/
+      /*write_dac(1, cv_pct * 60.0 * unit_semitone);*/
+      /*write_dac(1, out_val);*/
 
       if (b_lr) {
         state.seqBL[seqB_idx] = out_b;
