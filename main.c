@@ -43,11 +43,12 @@ void initialize() {
     loop_until_bit_is_set(TCD0.STATUS, TCD_ENRDY_bp);
     TCD0.CTRLA=1;
 
-    VREF.ADC0REF = 0x5; // Vdd
-    VREF.DAC0REF = 0x5; // Vdd
+    VREF.ADC0REF = 0x5;
+    VREF.DAC0REF = 0x5;
 
-    ADC0.CTRLB = 0x4;
     ADC0.CTRLA = 0b1;
+    ADC0.CTRLB = 0x7;
+    ADC0.CTRLD = 7;
 
     DAC0.CTRLA = 0b01000001;
 
@@ -59,8 +60,8 @@ void initialize() {
     stderr = &mystdout;
 }
 
-const uint8_t flips[15][2] = {{0, 0}, {7, 9}, {5, 11}, {2, 7}, {5, 7}, {4, 13}, {1, 2}, {3, 4}, {11, 6}, {3, 0}, {3, 1}, {4, 12}, {6, 2}, {13, 5}, {3, 6}, {1, 14}};
-
+/*const uint8_t flips[15][2] = {{0, 0}, {7, 9}, {5, 11}, {2, 7}, {5, 7}, {4, 13}, {1, 2}, {3, 4}, {11, 6}, {3, 0}, {3, 1}, {4, 12}, {6, 2}, {13, 5}, {3, 6}, {1, 14}};*/
+const uint8_t flips[40][2] = {{5, 12}, {8, 6}, {1, 5}, {6, 0}, {3, 11}, {4, 0}, {6, 9}, {5, 4}, {2, 3}, {6, 4}, {7, 1}, {4, 1}, {4, 15}, {6,5}, {0, 2}, {5, 6}, {0, 6}, {13, 9}, {14, 11}, {1, 8}, {14, 7}, {1, 4}, {2, 6}, {15, 9}, {10, 9}, {15, 13}, {9,10}, {11, 0}, {11, 14}, {8, 14}, {9, 11}, {13, 12}, {10, 11}, {9, 6}, {11, 15}, {12, 4}, {9, 15}, {14, 10}, {7,9}, {10, 3}};
 /*void print_bin(uint16_t u16) {*/
     /*int i = 16;*/
     /*while(i--) {*/
@@ -73,49 +74,30 @@ void pwm_out_sync() {
   TCD0.CTRLE = 0b10;
 }
 
-// response curve seems linear enough for this to work
-const float scale_factor_a = (5.0/5.10);
-const float scale_factor_b = (5.0/5.12);
+const float scale_factor_a = (4.0/4.069);
+const float scale_factor_b = (4.0/4.088);
+const float cv_in_scale_factor_a = (4.0/3.912);
+const float cv_in_scale_factor_b = (4.0/3.914);
 
 const float unit_semitone = 65535.0/60.0;
-// TODO do I even care
-/*uint16_t semitone_lut[61];*/
 
 uint16_t quantize_semitone(uint16_t value) {
   float pct = ((float) value) / 65535.0;
   uint16_t index = lround(pct * 60.0);
-  /*return semitone_lut[index];*/
-  return lround(index * unit_semitone);
+  return index * unit_semitone;
 }
 
 uint16_t flip(uint16_t pattern, uint8_t step) {
-  if (step == 15) {
-    return pattern;
-  }
-  volatile uint8_t i = 1; //wtf
+  volatile uint8_t i = 0; //wtf
   uint16_t res = pattern;
-  if (step < 15) {
-    uint8_t numSteps = 15-step;
-    for (; i <= numSteps; i++) {
-      uint8_t f1 = 15-flips[i][0];
-      uint8_t f2 = 15-flips[i][1];
-      uint8_t a = (res >> f1) & 1;
-      uint8_t b = (res >> f2) & 1;
-      uint16_t x = a ^ b;
-      x = (x << f1) | (x << f2);
-      res = res ^ x;
-    }
-  } else {
-    uint8_t numSteps = step-15;
-    for (; i < numSteps; i++) {
-      uint8_t f1 = flips[i][0];
-      uint8_t f2 = flips[i][1];
-      uint8_t a = (res >> f1) & 1;
-      uint8_t b = (res >> f2) & 1;
-      uint16_t x = a ^ b;
-      x = (x << f1) | (x << f2);
-      res = res ^ x;
-    }
+  for (; i < step; i++) {
+    uint8_t f1 = flips[i][0];
+    uint8_t f2 = flips[i][1];
+    uint8_t a = (res >> f1) & 1;
+    uint8_t b = (res >> f2) & 1;
+    uint16_t x = a ^ b;
+    x = (x << f1) | (x << f2);
+    res = res ^ x;
   }
   return res;
 }
@@ -151,7 +133,6 @@ uint8_t shift_registers_io(uint8_t out) {
     PORTC.OUTCLR = 0b1000; //clock low
   }
   return buttons;
-  return 0;
 }
 
 #define AIN_CVA 27 
@@ -331,8 +312,8 @@ int main(void) {
   uint16_t fade_b_div = fade_b_range/17;
   uint16_t sample_a_div = sample_a_range/17;
   uint16_t sample_b_div = sample_b_range/17;
-  uint16_t pattern_a_div = pattern_a_range/31;
-  uint16_t pattern_b_div = pattern_b_range/31;
+  uint16_t pattern_a_div = pattern_a_range/41;
+  uint16_t pattern_b_div = pattern_b_range/41;
 
   volatile struct seqstate save_buffer_data;
   volatile uint8_t * save_buffer = &state;
@@ -352,6 +333,8 @@ int main(void) {
   uint16_t atten_cv_range = invert_atten_cv ? atten_cv_low - atten_cv_high : atten_cv_high - atten_cv_low;
   uint16_t atten_rand_min = invert_atten_rand ? atten_rand_high : atten_rand_low;
   uint16_t atten_rand_range = invert_atten_rand ? atten_rand_low - atten_rand_high : atten_rand_high - atten_rand_low;
+
+  /*uint16_t test_val = 0;*/
 
   while (1) {
     if (cv_in_a_norm == 0xFFFF) {
@@ -439,7 +422,7 @@ int main(void) {
     uint8_t sampling_a = btn_sample_a | btn_sample_internal_a | (sample_a > 50000); //TODO hw changes
     uint8_t sampling_b = btn_sample_b | btn_sample_internal_b | (sample_b > 50000); //TODO 
     uint8_t sample_ext_a = !btn_sample_internal_a; // 0 = internal, 1 = external
-    uint8_t sample_ext_b = btn_sample_b; // 0 = internal, 1 = external
+    uint8_t sample_ext_b = !btn_sample_internal_b; // 0 = internal, 1 = external
     /*uint8_t sample_ext_b = !btn_sample_internal_b; // 0 = internal, 1 = external*/
 
     uint8_t seqA_idx = (state.seqA_start + state.index_a) % 16;
@@ -458,12 +441,12 @@ int main(void) {
       fade_quant_b = 16;
     }
     uint8_t step_a = pattern_a / pattern_a_div;
-    if (step_a > 30) {
-      step_a = 30;
+    if (step_a > 40) {
+      step_a = 40;
     }
     uint8_t step_b = pattern_b / pattern_b_div;
-    if (step_b > 30) {
-      step_b = 30;
+    if (step_b > 40) {
+      step_b = 40;
     }
 
     /*printf("[A] rand:%u sample:%u hold:%u zero:%u\n", btn_rand_a, btn_sample_a, btn_hold_a, btn_zero_a);*/
@@ -511,8 +494,23 @@ int main(void) {
     uint16_t out_a;
     uint16_t out_b;
 
-    uint16_t cv_in_a = read_adc(AIN_CVA) * cv_pct;
-    uint16_t cv_in_b = read_adc(AIN_CVB) * cv_pct;
+    uint16_t cv_in_a = read_adc(AIN_CVA);
+    float adjusted_a = (float)cv_in_a * cv_in_scale_factor_a;
+    if (adjusted_a > 65534.99) {
+      cv_in_a = 65535;
+    } else {
+      cv_in_a = adjusted_a;
+    }
+    cv_in_a *= cv_pct;
+
+    uint16_t cv_in_b = read_adc(AIN_CVB);
+    float adjusted_b = (float)cv_in_b * cv_in_scale_factor_b;
+    if (adjusted_b > 65534.99) {
+      cv_in_b = 65535;
+    } else {
+      cv_in_b = adjusted_b;
+    }
+    cv_in_b *= cv_pct;
 
     if (process_a) {
       TCD0.CMPASET = 2047-(cv_in_a >> 5);
@@ -577,9 +575,6 @@ int main(void) {
 
     if (process_b) {
       write_dac(1, out_b * scale_factor_b);
-      /*uint16_t out_val = cv_pct > 1 ? 65535 : 0;*/
-      /*write_dac(1, cv_pct * 60.0 * unit_semitone);*/
-      /*write_dac(1, out_val);*/
 
       if (b_lr) {
         state.seqBL[seqB_idx] = out_b;
