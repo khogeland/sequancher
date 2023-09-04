@@ -19,8 +19,8 @@ static int uart_putchar(char c, FILE *stream) {
 }
 
 void initialize() {
-    /*PORTA.DIR = 0b01010001; // USART*/
-    PORTA.DIR = 0b01110001; // PWM
+    PORTA.DIR = 0b01010001; // USART
+    /*PORTA.DIR = 0b01110001; // PWM*/
     PORTC.DIR = 0b00001101;
     PORTD.DIR = 0b00000000;
     PORTF.DIR = 0b00000000;
@@ -29,19 +29,19 @@ void initialize() {
     USART0.CTRLA = 0b00000000;
     USART0.CTRLC = 0x03; //default
     // cannot be enabled with PWM LEDs
-    /*PORTMUX.USARTROUTEA = 0b00000001;*/
-    /*USART0.CTRLB = 0b11000000;*/
+    PORTMUX.USARTROUTEA = 0b00000001;
+    USART0.CTRLB = 0b01000000;
 
-    PORTMUX.TCDROUTEA = 0x4;
-    TCD0.CMPASET = 2000;
-    TCD0.CMPACLR = 2047;
-    TCD0.CMPBSET = 4000;
-    TCD0.CMPBCLR = 4095;
+    /*PORTMUX.TCDROUTEA = 0x4;*/
+    /*TCD0.CMPASET = 2000;*/
+    /*TCD0.CMPACLR = 2047;*/
+    /*TCD0.CMPBSET = 4000;*/
+    /*TCD0.CMPBCLR = 4095;*/
 
-    CPU_CCP = CCP_IOREG_gc;
-    TCD0.FAULTCTRL = TCD_CMPAEN_bm | TCD_CMPBEN_bm;
-    loop_until_bit_is_set(TCD0.STATUS, TCD_ENRDY_bp);
-    TCD0.CTRLA=1;
+    /*CPU_CCP = CCP_IOREG_gc;*/
+    /*TCD0.FAULTCTRL = TCD_CMPAEN_bm | TCD_CMPBEN_bm;*/
+    /*loop_until_bit_is_set(TCD0.STATUS, TCD_ENRDY_bp);*/
+    /*TCD0.CTRLA=1;*/
 
     VREF.ADC0REF = 0x5;
     VREF.DAC0REF = 0x5;
@@ -55,6 +55,10 @@ void initialize() {
     PORTMUX.SPIROUTEA = 0x3;
     SPI0.CTRLB = 0b00000100;
     /*SPI0.CTRLA = 0b00100001;*/
+
+    write_dac(0b00100000, 0b11); //power up dac A and B
+    write_dac(0b00110000, 0b11); //LDAC pin disabled
+    write_dac(0b00111000, 1);    //enable internal reference, set gain = 2
 
     stdout = &mystdout;
     stderr = &mystdout;
@@ -70,14 +74,14 @@ const uint8_t flips[40][2] = {{5, 12}, {8, 6}, {1, 5}, {6, 0}, {3, 11}, {4, 0}, 
 /*}*/
 
 void pwm_out_sync() {
-  loop_until_bit_is_set(TCD0.STATUS, TCD_CMDRDY_bp);
-  TCD0.CTRLE = 0b10;
+  /*loop_until_bit_is_set(TCD0.STATUS, TCD_CMDRDY_bp);*/
+  /*TCD0.CTRLE = 0b10;*/
 }
 
 const float scale_factor_a = (4.0/4.069);
 const float scale_factor_b = (4.0/4.088);
-const float cv_in_scale_factor_a = (4.0/3.912);
-const float cv_in_scale_factor_b = (4.0/3.914);
+const float cv_in_scale_factor_a = (4.0/3.978);
+const float cv_in_scale_factor_b = (4.0/3.975);
 
 const float unit_semitone = 65535.0/60.0;
 
@@ -165,13 +169,13 @@ uint16_t read_adc(uint8_t muxpos) {
     return res;
 }
 
-void write_dac(uint8_t channel, uint16_t value) {
+void write_dac(uint8_t command, uint16_t data) {
   SPI0.CTRLA = 0b00100001;
-  uint16_t data = (value >> 4) & 0b0000111111111111;
   uint8_t byteA = (data >> 8) & 0xFF;
-  byteA = 0b00010000 | byteA | (channel << 7);
   uint8_t byteB = data & 0xFF;
   PORTA.OUTCLR = 0b01000000; //SS_DAC
+  SPI0.DATA = command;
+  loop_until_bit_is_set(SPI0.INTFLAGS, SPI_IF_bp);
   SPI0.DATA = byteA;
   loop_until_bit_is_set(SPI0.INTFLAGS, SPI_IF_bp);
   SPI0.DATA = byteB;
