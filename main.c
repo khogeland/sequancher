@@ -151,12 +151,12 @@ uint8_t shift_registers_io(uint8_t out) {
 #define AIN_SMB 16 
 
 #define GATE_B  0b10000000
-#define LED_A_F 0b00100000
-#define LED_A_P 0b01000000
-#define LED_A_S 0b00010000
-#define LED_B_F 0b00000100
-#define LED_B_P 0b00001000
-#define LED_B_S 0b00000010
+#define LED_B_R 0b00100000
+#define LED_B_C 0b01000000
+#define LED_B_L 0b00010000
+#define LED_A_R 0b00000100
+#define LED_A_C 0b00001000
+#define LED_A_L 0b00000010
 #define GATE_A  0b00000001
 
 uint16_t read_adc(uint8_t muxpos) {
@@ -219,7 +219,7 @@ uint16_t adjust(uint16_t reading, uint16_t min, uint16_t range) {
   if (res > range) {
     res = range;
   }
-  /*printf("%u %u %u -> %u\n", reading, min, range, res);*/
+  printf("%u %u %u -> %u\n", reading, min, range, res);
   return res;
 }
 
@@ -339,7 +339,16 @@ int main(void) {
   uint16_t atten_rand_range = invert_atten_rand ? atten_rand_low - atten_rand_high : atten_rand_high - atten_rand_low;
 
   /*uint16_t test_val = 0;*/
+  
+  /*while (1) {*/
+    /*printf("hello\n");*/
+  /*}*/
 
+  printf("hello\n");
+  /*while (1) {*/
+    /*shift_out = LED_B_R;*/
+    /*shift_registers_io(shift_out);*/
+  /*}*/
   while (1) {
     if (cv_in_a_norm == 0xFFFF) {
       lfo_up = 0;
@@ -353,7 +362,6 @@ int main(void) {
     }
     DAC0.DATA = cv_in_a_norm;
     uint16_t random_a = prng();
-    /*printf("hi lol\n");*/
     uint8_t clock_a = (PORTC.IN >> 1) & 1;
     uint8_t clock_b = (PORTF.IN >> 1) & 1;
     uint8_t process_a = 0;
@@ -412,16 +420,15 @@ int main(void) {
     }
     atten_rand = adjust(atten_rand, atten_rand_min, atten_rand_range);
     uint8_t buttons = shift_registers_io(shift_out);
-    uint8_t btn_zero_b = buttons & 1;
-    /*uint8_t btn_hold_b = (buttons >> 1) & 1;*/
-    uint8_t btn_sample_internal_b = (buttons >> 1) & 1;
+
+    uint8_t btn_rand_b = buttons & 1;
+    uint8_t btn_zero_b = (buttons >> 1) & 1;
     uint8_t btn_sample_b = (buttons >> 2) & 1;
-    uint8_t btn_rand_b = (buttons >> 3) & 1;
-    uint8_t btn_rand_a = (buttons >> 4) & 1;
+    uint8_t btn_sample_internal_b = (buttons >> 3) & 1;
+    uint8_t btn_sample_internal_a = (buttons >> 4) & 1;
     uint8_t btn_sample_a = (buttons >> 5) & 1;
-    uint8_t btn_sample_internal_a = (buttons >> 6) & 1;
-    /*uint8_t btn_hold_a = (buttons >> 6) & 1;*/
-    uint8_t btn_zero_a = (buttons >> 7) & 1;
+    uint8_t btn_zero_a = (buttons >> 6) & 1;
+    uint8_t btn_rand_a = (buttons >> 7) & 1;
 
     uint8_t sampling_a = btn_sample_a | btn_sample_internal_a | (sample_a > 50000); //TODO hw changes
     uint8_t sampling_b = btn_sample_b | btn_sample_internal_b | (sample_b > 50000); //TODO 
@@ -453,11 +460,11 @@ int main(void) {
       step_b = 40;
     }
 
-    /*printf("[A] rand:%u sample:%u hold:%u zero:%u\n", btn_rand_a, btn_sample_a, btn_hold_a, btn_zero_a);*/
-    /*printf("[A] fade:%u pattern:%u sample:%u\n", fade_quant_a, step_a, sample_quant_a);*/
-    /*printf("[B] rand:%u sample:%u hold:%u zero:%u\n", btn_rand_b, btn_sample_b, btn_hold_b, btn_zero_b);*/
-    /*printf("[B] fade:%u pattern:%u sample:%u\n", fade_quant_b, step_b, sample_quant_b);*/
-    /*printf("[ATTEN] cv:%u rand:%u\n", atten_cv, atten_rand);*/
+    printf("[A] rand:%u sample:%u sample_internal:%u zero:%u\n", btn_rand_a, btn_sample_a, btn_sample_internal_a, btn_zero_a);
+    printf("[A] fade:%u pattern:%u sample:%u\n", fade_quant_a, step_a, sample_a);
+    printf("[B] rand:%u sample:%u sample_internal:%u zero:%u\n", btn_rand_b, btn_sample_b, btn_sample_internal_b, btn_zero_b);
+    printf("[B] fade:%u pattern:%u sample:%u\n", fade_quant_b, step_b, sample_b);
+    printf("[ATTEN] cv:%u rand:%u\n", atten_cv, atten_rand);
 
     uint16_t unflipped_a = 0;
     uint16_t unflipped_b = 0;
@@ -516,12 +523,14 @@ int main(void) {
     }
     cv_in_b *= cv_pct;
 
+    printf("start processing\n");
     if (process_a) {
+      printf("process_a\n");
       TCD0.CMPASET = 2047-(cv_in_a >> 5);
-      shift_out = shift_out & ~LED_A_F & ~LED_A_P & ~LED_A_S & ~GATE_A;
-      shift_out = shift_out | (a_lr ? (LED_A_F | GATE_A) : LED_A_P);
+      shift_out = shift_out & ~LED_A_L & ~LED_A_R & ~LED_A_C & ~GATE_A;
+      shift_out = shift_out | (a_lr ? (LED_A_L | GATE_A) : LED_A_R);
       if (sampling_a) {
-        shift_out = shift_out | LED_A_S; 
+        shift_out = shift_out | LED_A_C; 
       }
       if (sampling_a && sample_ext_a) {
         out_a = quantize_semitone(cv_in_a);
@@ -535,11 +544,12 @@ int main(void) {
     }
 
     if (process_b) {
+      printf("process_b\n");
       TCD0.CMPBSET = 4095-(cv_in_b >> 5);
-      shift_out = shift_out & ~LED_B_F & ~LED_B_P & ~LED_B_S & ~GATE_B;
-      shift_out = shift_out | (b_lr ? (LED_B_F | GATE_B) : LED_B_P);
+      shift_out = shift_out & ~LED_B_L & ~LED_B_R & ~LED_B_C & ~GATE_B;
+      shift_out = shift_out | (b_lr ? (LED_B_L | GATE_B) : LED_B_R);
       if (sampling_b) {
-        shift_out = shift_out | LED_B_S; 
+        shift_out = shift_out | LED_B_C; 
       }
       if (sampling_b && sample_ext_b) {
           out_b = quantize_semitone(cv_in_b);
@@ -552,6 +562,7 @@ int main(void) {
       }
     }
 
+    printf("sampling\n");
     if (process_a && sampling_a && !(sample_ext_a)) {
       // sampling each other, swap
       if (process_b && sampling_b && !(sample_ext_b)) {
@@ -566,6 +577,7 @@ int main(void) {
     }
 
     if (process_a) {
+      printf("dac out a\n");
       write_dac(0, out_a * scale_factor_a);
 
       if (a_lr) {
@@ -578,6 +590,7 @@ int main(void) {
     }
 
     if (process_b) {
+      printf("dac out b\n");
       write_dac(1, out_b * scale_factor_b);
 
       if (b_lr) {
