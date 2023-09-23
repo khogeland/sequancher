@@ -43,7 +43,7 @@ void initialize() {
     /*loop_until_bit_is_set(TCD0.STATUS, TCD_ENRDY_bp);*/
     /*TCD0.CTRLA=1;*/
 
-    VREF.ADC0REF = 0x5;
+    VREF.ADC0REF = 0x6;
     VREF.DAC0REF = 0x5;
 
     ADC0.CTRLA = 0b1;
@@ -65,7 +65,8 @@ void initialize() {
 }
 
 /*const uint8_t flips[15][2] = {{0, 0}, {7, 9}, {5, 11}, {2, 7}, {5, 7}, {4, 13}, {1, 2}, {3, 4}, {11, 6}, {3, 0}, {3, 1}, {4, 12}, {6, 2}, {13, 5}, {3, 6}, {1, 14}};*/
-const uint8_t flips[40][2] = {{5, 12}, {8, 6}, {1, 5}, {6, 0}, {3, 11}, {4, 0}, {6, 9}, {5, 4}, {2, 3}, {6, 4}, {7, 1}, {4, 1}, {4, 15}, {6,5}, {0, 2}, {5, 6}, {0, 6}, {13, 9}, {14, 11}, {1, 8}, {14, 7}, {1, 4}, {2, 6}, {15, 9}, {10, 9}, {15, 13}, {9,10}, {11, 0}, {11, 14}, {8, 14}, {9, 11}, {13, 12}, {10, 11}, {9, 6}, {11, 15}, {12, 4}, {9, 15}, {14, 10}, {7,9}, {10, 3}};
+/*const uint8_t flips[40][2] = {{5, 12}, {8, 6}, {1, 5}, {6, 0}, {3, 11}, {4, 0}, {6, 9}, {5, 4}, {2, 3}, {6, 4}, {7, 1}, {4, 1}, {4, 15}, {6,5}, {0, 2}, {5, 6}, {0, 6}, {13, 9}, {14, 11}, {1, 8}, {14, 7}, {1, 4}, {2, 6}, {15, 9}, {10, 9}, {15, 13}, {9,10}, {11, 0}, {11, 14}, {8, 14}, {9, 11}, {13, 12}, {10, 11}, {9, 6}, {11, 15}, {12, 4}, {9, 15}, {14, 10}, {7,9}, {10, 3}};*/
+const uint8_t flips[40][2] = {{6, 10}, {4, 8}, {7, 11}, {5, 9}, {7, 8}, {3, 12}, {4, 10}, {0, 5}, {5, 14}, {0, 11}, {3, 7}, {1, 7}, {6, 3}, {5, 2}, {2, 9}, {7, 8}, {0, 15}, {1, 14}, {2, 13}, {3, 12}, {4, 11}, {5, 10}, {6, 9}, {7, 8}, {8, 7}, {13, 6}, {10, 13}, {9, 12}, {14, 8}, {12, 8}, {15, 4}, {10, 1}, {15, 10}, {11, 5}, {12, 3}, {8, 7}, {10, 6}, {8, 4}, {11, 7}, {9, 5}};
 /*void print_bin(uint16_t u16) {*/
     /*int i = 16;*/
     /*while(i--) {*/
@@ -78,10 +79,14 @@ void pwm_out_sync() {
   /*TCD0.CTRLE = 0b10;*/
 }
 
-const float scale_factor_a = (4.0/4.069);
-const float scale_factor_b = (4.0/4.088);
+/*const float scale_factor_a = (4.0/4.069);*/
+/*const float scale_factor_b = (4.0/4.088);*/
 const float cv_in_scale_factor_a = (4.0/3.978);
 const float cv_in_scale_factor_b = (4.0/3.975);
+const float scale_factor_a = 1.0;
+const float scale_factor_b = 1.0;
+/*const float cv_in_scale_factor_a = 1.0;*/
+/*const float cv_in_scale_factor_b = 1.0;*/
 
 const float unit_semitone = 65535.0/60.0;
 
@@ -145,7 +150,7 @@ uint8_t shift_registers_io(uint8_t out) {
 #define AIN_PTA 3
 #define AIN_SMA 4
 #define AIN_FDB 5
-#define AIN_ACV 7
+#define AIN_ACV 25
 #define AIN_ARD 23 
 #define AIN_PTB 22 
 #define AIN_SMB 16 
@@ -159,14 +164,23 @@ uint8_t shift_registers_io(uint8_t out) {
 #define LED_A_L 0b00000010
 #define GATE_A  0b00000001
 
+uint16_t adc_offset;
+
 uint16_t read_adc(uint8_t muxpos) {
+    if (muxpos != AIN_CVA & muxpos != AIN_CVB)
+      VREF.ADC0REF = 0x5;
     /*ADC0.MUXPOS = 0x7;*/
     ADC0.MUXPOS = muxpos;
     ADC0.COMMAND = 1;
     loop_until_bit_is_set(ADC0.INTFLAGS, ADC_RESRDY_bp);
     uint16_t res = ADC0.RES;
     ADC0.COMMAND = 0;
-    return res;
+    VREF.ADC0REF = 0x6;
+    if (adc_offset > res) {
+      return 0;
+    } else {
+      return res-adc_offset;
+    }
 }
 
 void write_dac(uint8_t command, uint16_t data) {
@@ -198,16 +212,14 @@ uint16_t atten_rand_low;
 uint16_t atten_rand_high;
 uint16_t fade_a_min;
 uint16_t fade_a_range;
-uint16_t sample_a_min;
-uint16_t sample_a_range;
 uint16_t pattern_a_min;
 uint16_t pattern_a_range;
 uint16_t fade_b_min;
 uint16_t fade_b_range;
 uint16_t pattern_b_min;
 uint16_t pattern_b_range;
-uint16_t sample_b_min;
-uint16_t sample_b_range;
+float cv_in_gain_correction_a;
+float cv_in_gain_correction_b;
 
 uint16_t adjust(uint16_t reading, uint16_t min, uint16_t range) {
   uint16_t res = reading;
@@ -240,16 +252,58 @@ int main(void) {
   uint8_t shift_out = 0;
   uint8_t clocklow_a = 0;
   uint8_t clocklow_b = 0;
-  if (shift_registers_io(0) == 0xFF) {
+  if (shift_registers_io(0) == 0b11110000) {
     printf("Calibration mode babey!!!!!\n");
+    adc_offset = 0;
+    write_dac(0, 5000);
+    write_dac(1, 5000);
+    _delay_ms(100);
+    uint32_t vals = 0;
+    volatile uint8_t i = 0;
+    for (; i < 100; i++) {
+      vals += read_adc(AIN_CVA);
+    }
+    uint16_t val1a = vals / 100;
+    i = 0; vals = 0;
+    for (; i < 100; i++) {
+      vals += read_adc(AIN_CVB);
+    }
+    uint16_t val1b = vals / 100;
+    write_dac(0, 50000);
+    write_dac(1, 50000);
+    _delay_ms(100);
+    vals = 0; i = 0;
+    for (; i < 100; i++) {
+      vals += read_adc(AIN_CVA);
+    }
+    uint16_t val2a = vals/100;
+    vals = 0; i = 0;
+    for (; i < 100; i++) {
+      vals += read_adc(AIN_CVB);
+    }
+    uint16_t val2b = vals/100;
+
+    printf("%u %u %u %u\n", val1a, val1b, val2a, val2b);
+
+    adc_offset = val1a - 5000;
+    cv_in_gain_correction_a = 50000.0/(float)(val2a - adc_offset);
+    cv_in_gain_correction_b = 50000.0/(float)(val2b - adc_offset);
+
+    write_dac(0, 25000);
+    write_dac(1, 25000);
+    _delay_ms(100);
+
+    uint16_t valA = ((float)read_adc(AIN_CVA)) * cv_in_gain_correction_a;
+    uint16_t valB = ((float)read_adc(AIN_CVB)) * cv_in_gain_correction_b;
+
+    printf("%u\n%u\n\n", valA, valB);
+
     _delay_ms(2000);
     while (!shift_registers_io(0xFF)) {
       fade_a_min = read_adc(AIN_FDA);
       pattern_a_min = read_adc(AIN_PTA);
-      sample_a_min = read_adc(AIN_SMA);
       fade_b_min = read_adc(AIN_FDB);
       pattern_b_min = read_adc(AIN_PTB);
-      sample_b_min = read_adc(AIN_SMB);
       atten_cv_low = read_adc(AIN_ACV);
       atten_rand_low = read_adc(AIN_ARD);
     }
@@ -258,10 +312,8 @@ int main(void) {
     while (!shift_registers_io(0x44)) {
       fade_a_range = read_adc(AIN_FDA)-fade_a_min;
       pattern_a_range = read_adc(AIN_PTA)-pattern_a_min;
-      sample_a_range = read_adc(AIN_SMA)-sample_a_min;
       fade_b_range = read_adc(AIN_FDB)-fade_b_min;
       pattern_b_range = read_adc(AIN_PTB)-pattern_b_min;
-      sample_b_range = read_adc(AIN_SMB)-sample_b_min;
       atten_cv_high = read_adc(AIN_ACV);
       atten_rand_high = read_adc(AIN_ARD);
     }
@@ -277,18 +329,18 @@ int main(void) {
     _PROTECTED_WRITE_SPM(NVMCTRL.CTRLA, NVMCTRL_CMD_FLWR_gc);
     *((uint16_t *)(&USERROW.USERROW0)) = fade_a_min;
     *((uint16_t *)(&USERROW.USERROW2)) = pattern_a_min;
-    *((uint16_t *)(&USERROW.USERROW4)) = sample_a_min;
+    *((uint16_t *)(&USERROW.USERROW4)) = adc_offset;
     *((uint16_t *)(&USERROW.USERROW6)) = fade_b_min;
     *((uint16_t *)(&USERROW.USERROW8)) = pattern_b_min;
-    *((uint16_t *)(&USERROW.USERROW10)) = sample_b_min;
+    /**((uint16_t *)(&USERROW.USERROW10)) = 0;*/
     *((uint16_t *)(&USERROW.USERROW12)) = atten_cv_low;
     *((uint16_t *)(&USERROW.USERROW14)) = atten_rand_low;
     *((uint16_t *)(&USERROW.USERROW16)) = fade_a_range;
     *((uint16_t *)(&USERROW.USERROW18)) = pattern_a_range;
-    *((uint16_t *)(&USERROW.USERROW20)) = sample_a_range;
+    *((uint16_t *)(&USERROW.USERROW20)) = val2a;
     *((uint16_t *)(&USERROW.USERROW22)) = fade_b_range;
     *((uint16_t *)(&USERROW.USERROW24)) = pattern_b_range;
-    *((uint16_t *)(&USERROW.USERROW26)) = sample_b_range;
+    *((uint16_t *)(&USERROW.USERROW26)) = val2b;
     *((uint16_t *)(&USERROW.USERROW28)) = atten_cv_high;
     *((uint16_t *)(&USERROW.USERROW30)) = atten_rand_high;
     while (NVMCTRL.STATUS & (NVMCTRL_EEBUSY_bm | NVMCTRL_FBUSY_bm));
@@ -297,25 +349,25 @@ int main(void) {
   } else {
     fade_a_min = (*((uint16_t *) &USERROW.USERROW0));
     pattern_a_min = (*((uint16_t *) &USERROW.USERROW2));
-    sample_a_min = (*((uint16_t *) &USERROW.USERROW4));
+    adc_offset = (*((uint16_t *) &USERROW.USERROW4));
     fade_b_min = (*((uint16_t *) &USERROW.USERROW6));
     pattern_b_min = (*((uint16_t *) &USERROW.USERROW8));
-    sample_b_min = (*((uint16_t *) &USERROW.USERROW10));
+    /*blah = (*((uint16_t *) &USERROW.USERROW10));*/
     atten_cv_low = (*((uint16_t *) &USERROW.USERROW12));
     atten_rand_low = (*((uint16_t *) &USERROW.USERROW14));
     fade_a_range = (*((uint16_t *) &USERROW.USERROW16));
     pattern_a_range = (*((uint16_t *) &USERROW.USERROW18));
-    sample_a_range = (*((uint16_t *) &USERROW.USERROW20));
+    uint16_t val2a = (*((uint16_t *) &USERROW.USERROW20));
     fade_b_range = (*((uint16_t *) &USERROW.USERROW22));
     pattern_b_range = (*((uint16_t *) &USERROW.USERROW24));
-    sample_b_range = (*((uint16_t *) &USERROW.USERROW26));
+    uint16_t val2b = (*((uint16_t *) &USERROW.USERROW26));
     atten_cv_high = (*((uint16_t *) &USERROW.USERROW28));
     atten_rand_high = (*((uint16_t *) &USERROW.USERROW30));
+    cv_in_gain_correction_a = 50000.0/(float)(val2a - adc_offset);
+    cv_in_gain_correction_b = 50000.0/(float)(val2b - adc_offset);
   }
   uint16_t fade_a_div = fade_a_range/17;
   uint16_t fade_b_div = fade_b_range/17;
-  uint16_t sample_a_div = sample_a_range/17;
-  uint16_t sample_b_div = sample_b_range/17;
   uint16_t pattern_a_div = pattern_a_range/41;
   uint16_t pattern_b_div = pattern_b_range/41;
 
@@ -402,13 +454,19 @@ int main(void) {
     if (reset && process_b) {
         state.index_b = 0;
     }
+
+    uint16_t cv_in_a = ((float)read_adc(AIN_CVA))*cv_in_gain_correction_a;
+    /*printf("=====\n%u\n=====\n", cv_in_a);*/
+
+    uint16_t cv_in_b = ((float)read_adc(AIN_CVB))*cv_in_gain_correction_b;
+
     // inputs
     uint16_t fade_a = adjust(read_adc(AIN_FDA), fade_a_min, fade_a_range);
     uint16_t pattern_a = adjust(read_adc(AIN_PTA), pattern_a_min, pattern_a_range);
-    uint16_t sample_a = adjust(read_adc(AIN_SMA), sample_a_min, sample_a_range);
+    uint16_t sample_a = read_adc(AIN_SMA);
     uint16_t fade_b = adjust(read_adc(AIN_FDB), fade_b_min, fade_b_range);
     uint16_t pattern_b = adjust(read_adc(AIN_PTB), pattern_b_min, pattern_b_range);
-    uint16_t sample_b = adjust(read_adc(AIN_SMB), sample_b_min, sample_b_range);
+    uint16_t sample_b = read_adc(AIN_SMB);
     uint16_t atten_cv = read_adc(AIN_ACV);
     if (invert_atten_cv) {
       atten_cv = 0xFFFF - atten_cv;
@@ -430,10 +488,20 @@ int main(void) {
     uint8_t btn_zero_a = (buttons >> 6) & 1;
     uint8_t btn_rand_a = (buttons >> 7) & 1;
 
-    uint8_t sampling_a = btn_sample_a | btn_sample_internal_a | (sample_a > 50000); //TODO hw changes
-    uint8_t sampling_b = btn_sample_b | btn_sample_internal_b | (sample_b > 50000); //TODO 
-    uint8_t sample_ext_a = !btn_sample_internal_a; // 0 = internal, 1 = external
-    uint8_t sample_ext_b = !btn_sample_internal_b; // 0 = internal, 1 = external
+    uint8_t sampling_a = btn_sample_a | btn_sample_internal_a | (sample_a > 2000); //TODO hw changes
+    uint8_t sampling_b = btn_sample_b | btn_sample_internal_b | (sample_b > 2000); //TODO 
+    uint8_t sample_ext_a = sample_a > 7500; // 0 = internal, 1 = external
+    uint8_t sample_ext_b = sample_b > 7500; // 0 = internal, 1 = external
+    if (btn_sample_a) {
+      sample_ext_a = 1;
+    } else if (btn_sample_internal_a) {
+      sample_ext_a = 0;
+    }
+    if (btn_sample_b) {
+      sample_ext_b = 1;
+    } else if (btn_sample_internal_b) {
+      sample_ext_b = 0;
+    }
     /*uint8_t sample_ext_b = !btn_sample_internal_b; // 0 = internal, 1 = external*/
 
     uint8_t seqA_idx = (state.seqA_start + state.index_a) % 16;
@@ -460,11 +528,11 @@ int main(void) {
       step_b = 40;
     }
 
-    printf("[A] rand:%u sample:%u sample_internal:%u zero:%u\n", btn_rand_a, btn_sample_a, btn_sample_internal_a, btn_zero_a);
-    printf("[A] fade:%u pattern:%u sample:%u\n", fade_quant_a, step_a, sample_a);
-    printf("[B] rand:%u sample:%u sample_internal:%u zero:%u\n", btn_rand_b, btn_sample_b, btn_sample_internal_b, btn_zero_b);
-    printf("[B] fade:%u pattern:%u sample:%u\n", fade_quant_b, step_b, sample_b);
-    printf("[ATTEN] cv:%u rand:%u\n", atten_cv, atten_rand);
+    /*printf("[A] rand:%u sample:%u sample_internal:%u zero:%u\n", btn_rand_a, btn_sample_a, btn_sample_internal_a, btn_zero_a);*/
+    /*printf("[A] fade:%u pattern:%u sample:%u ext=%u\n", fade_quant_a, step_a, sample_a, sample_ext_a);*/
+    /*printf("[B] rand:%u sample:%u sample_internal:%u zero:%u\n", btn_rand_b, btn_sample_b, btn_sample_internal_b, btn_zero_b);*/
+    /*printf("[B] fade:%u pattern:%u sample:%u ext=%u\n", fade_quant_b, step_b, sample_b, sample_ext_b);*/
+    /*printf("[ATTEN] cv:%u rand:%u\n", atten_cv, atten_rand);*/
 
     uint16_t unflipped_a = 0;
     uint16_t unflipped_b = 0;
@@ -489,6 +557,8 @@ int main(void) {
 
     float rand_pct = fmin(0.9999999, ((float)atten_rand) / atten_rand_range);
     float cv_pct = fmin(0.9999999, ((float)atten_cv) / atten_rand_range);
+    cv_in_a *= cv_pct;
+    cv_in_b *= cv_pct;
     uint16_t random_b = 0;
     if (btn_rand_b) {
       random_b = prng();
@@ -505,27 +575,9 @@ int main(void) {
     uint16_t out_a;
     uint16_t out_b;
 
-    uint16_t cv_in_a = read_adc(AIN_CVA);
-    float adjusted_a = (float)cv_in_a * cv_in_scale_factor_a;
-    if (adjusted_a > 65534.99) {
-      cv_in_a = 65535;
-    } else {
-      cv_in_a = adjusted_a;
-    }
-    cv_in_a *= cv_pct;
-
-    uint16_t cv_in_b = read_adc(AIN_CVB);
-    float adjusted_b = (float)cv_in_b * cv_in_scale_factor_b;
-    if (adjusted_b > 65534.99) {
-      cv_in_b = 65535;
-    } else {
-      cv_in_b = adjusted_b;
-    }
-    cv_in_b *= cv_pct;
-
-    printf("start processing\n");
+    /*printf("start processing\n");*/
     if (process_a) {
-      printf("process_a\n");
+      /*printf("process_a\n");*/
       TCD0.CMPASET = 2047-(cv_in_a >> 5);
       shift_out = shift_out & ~LED_A_L & ~LED_A_R & ~LED_A_C & ~GATE_A;
       shift_out = shift_out | (a_lr ? (LED_A_L | GATE_A) : LED_A_R);
@@ -534,6 +586,7 @@ int main(void) {
       }
       if (sampling_a && sample_ext_a) {
         out_a = quantize_semitone(cv_in_a);
+        /*printf("\nout_a=%u\n", out_a);*/
       } else if (btn_rand_a) {
         out_a = quantize_semitone(random_a);
       } else if (btn_zero_a) {
@@ -544,7 +597,7 @@ int main(void) {
     }
 
     if (process_b) {
-      printf("process_b\n");
+      /*printf("process_b\n");*/
       TCD0.CMPBSET = 4095-(cv_in_b >> 5);
       shift_out = shift_out & ~LED_B_L & ~LED_B_R & ~LED_B_C & ~GATE_B;
       shift_out = shift_out | (b_lr ? (LED_B_L | GATE_B) : LED_B_R);
@@ -562,7 +615,6 @@ int main(void) {
       }
     }
 
-    printf("sampling\n");
     if (process_a && sampling_a && !(sample_ext_a)) {
       // sampling each other, swap
       if (process_b && sampling_b && !(sample_ext_b)) {
@@ -577,7 +629,7 @@ int main(void) {
     }
 
     if (process_a) {
-      printf("dac out a\n");
+      /*printf("dac out a\n");*/
       write_dac(0, out_a * scale_factor_a);
 
       if (a_lr) {
@@ -590,7 +642,7 @@ int main(void) {
     }
 
     if (process_b) {
-      printf("dac out b\n");
+      /*printf("dac out b\n");*/
       write_dac(1, out_b * scale_factor_b);
 
       if (b_lr) {
@@ -605,7 +657,7 @@ int main(void) {
     pwm_out_sync();
     shift_registers_io(shift_out);
 
-    /*printf("%u %u %u", index, out_a, out_b);*/
+    /*printf("%u %u\n", out_a, out_b);*/
     /*printf("[A] %u + %u\n", state.seqA_start, index_a);*/
 
     // save when either sequence is at zero and something has happened since last save
