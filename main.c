@@ -1,6 +1,6 @@
-// TODO not working
-#define F_CPU 4000000UL
+#define F_CPU 24000000UL
 
+#include <pattern_table.h>
 #include <avr/io.h>
 #include <avr/eeprom.h>
 #include <stdio.h>
@@ -19,8 +19,8 @@ static int uart_putchar(char c, FILE *stream) {
 }
 
 void initialize() {
+    _PROTECTED_WRITE(CLKCTRL.OSCHFCTRLA, 0x9);
     PORTA.DIR = 0b01010001; // USART
-    /*PORTA.DIR = 0b01110001; // PWM*/
     PORTC.DIR = 0b00001101;
     PORTD.DIR = 0b00000000;
     PORTF.DIR = 0b00000000;
@@ -28,27 +28,17 @@ void initialize() {
     USART0.BAUD = 138; // 115200 if F_CPU = 4MHz
     USART0.CTRLA = 0b00000000;
     USART0.CTRLC = 0x03; //default
-    // cannot be enabled with PWM LEDs
     PORTMUX.USARTROUTEA = 0b00000001;
     USART0.CTRLB = 0b01000000;
-
-    /*PORTMUX.TCDROUTEA = 0x4;*/
-    /*TCD0.CMPASET = 2000;*/
-    /*TCD0.CMPACLR = 2047;*/
-    /*TCD0.CMPBSET = 4000;*/
-    /*TCD0.CMPBCLR = 4095;*/
-
-    /*CPU_CCP = CCP_IOREG_gc;*/
-    /*TCD0.FAULTCTRL = TCD_CMPAEN_bm | TCD_CMPBEN_bm;*/
-    /*loop_until_bit_is_set(TCD0.STATUS, TCD_ENRDY_bp);*/
-    /*TCD0.CTRLA=1;*/
 
     VREF.ADC0REF = 0x6;
     VREF.DAC0REF = 0x5;
 
     ADC0.CTRLA = 0b1;
-    ADC0.CTRLB = 0x7;
-    ADC0.CTRLD = 7;
+
+    //todo these are the lowest values where nothing breaks
+    ADC0.CTRLB = 0x5;
+    ADC0.CTRLD = 0x2;
 
     DAC0.CTRLA = 0b01000001;
 
@@ -64,9 +54,6 @@ void initialize() {
     stderr = &mystdout;
 }
 
-/*const uint8_t flips[15][2] = {{0, 0}, {7, 9}, {5, 11}, {2, 7}, {5, 7}, {4, 13}, {1, 2}, {3, 4}, {11, 6}, {3, 0}, {3, 1}, {4, 12}, {6, 2}, {13, 5}, {3, 6}, {1, 14}};*/
-/*const uint8_t flips[40][2] = {{5, 12}, {8, 6}, {1, 5}, {6, 0}, {3, 11}, {4, 0}, {6, 9}, {5, 4}, {2, 3}, {6, 4}, {7, 1}, {4, 1}, {4, 15}, {6,5}, {0, 2}, {5, 6}, {0, 6}, {13, 9}, {14, 11}, {1, 8}, {14, 7}, {1, 4}, {2, 6}, {15, 9}, {10, 9}, {15, 13}, {9,10}, {11, 0}, {11, 14}, {8, 14}, {9, 11}, {13, 12}, {10, 11}, {9, 6}, {11, 15}, {12, 4}, {9, 15}, {14, 10}, {7,9}, {10, 3}};*/
-const uint8_t flips[40][2] = {{6, 10}, {4, 8}, {7, 11}, {5, 9}, {7, 8}, {3, 12}, {4, 10}, {0, 5}, {5, 14}, {0, 11}, {3, 7}, {1, 7}, {6, 3}, {5, 2}, {2, 9}, {7, 8}, {0, 15}, {1, 14}, {2, 13}, {3, 12}, {4, 11}, {5, 10}, {6, 9}, {7, 8}, {8, 7}, {13, 6}, {10, 13}, {9, 12}, {14, 8}, {12, 8}, {15, 4}, {10, 1}, {15, 10}, {11, 5}, {12, 3}, {8, 7}, {10, 6}, {8, 4}, {11, 7}, {9, 5}};
 /*void print_bin(uint16_t u16) {*/
     /*int i = 16;*/
     /*while(i--) {*/
@@ -74,13 +61,6 @@ const uint8_t flips[40][2] = {{6, 10}, {4, 8}, {7, 11}, {5, 9}, {7, 8}, {3, 12},
     /*}*/
 /*}*/
 
-void pwm_out_sync() {
-  /*loop_until_bit_is_set(TCD0.STATUS, TCD_CMDRDY_bp);*/
-  /*TCD0.CTRLE = 0b10;*/
-}
-
-/*const float scale_factor_a = (4.0/4.069);*/
-/*const float scale_factor_b = (4.0/4.088);*/
 const float cv_in_scale_factor_a = (4.0/3.978);
 const float cv_in_scale_factor_b = (4.0/3.975);
 const float scale_factor_a = 1.0;
@@ -94,21 +74,6 @@ uint16_t quantize_semitone(uint16_t value) {
   float pct = ((float) value) / 65535.0;
   uint16_t index = lround(pct * 60.0);
   return index * unit_semitone;
-}
-
-uint16_t flip(uint16_t pattern, uint8_t step) {
-  volatile uint8_t i = 0; //wtf
-  uint16_t res = pattern;
-  for (; i < step; i++) {
-    uint8_t f1 = flips[i][0];
-    uint8_t f2 = flips[i][1];
-    uint8_t a = (res >> f1) & 1;
-    uint8_t b = (res >> f2) & 1;
-    uint16_t x = a ^ b;
-    x = (x << f1) | (x << f2);
-    res = res ^ x;
-  }
-  return res;
 }
 
 uint8_t shift_registers_io(uint8_t out) {
@@ -167,9 +132,9 @@ uint8_t shift_registers_io(uint8_t out) {
 uint16_t adc_offset;
 
 uint16_t read_adc(uint8_t muxpos) {
-    if (muxpos != AIN_CVA & muxpos != AIN_CVB)
+    if (muxpos != AIN_CVA & muxpos != AIN_CVB) {
       VREF.ADC0REF = 0x5;
-    /*ADC0.MUXPOS = 0x7;*/
+    }
     ADC0.MUXPOS = muxpos;
     ADC0.COMMAND = 1;
     loop_until_bit_is_set(ADC0.INTFLAGS, ADC_RESRDY_bp);
@@ -231,11 +196,11 @@ uint16_t adjust(uint16_t reading, uint16_t min, uint16_t range) {
   if (res > range) {
     res = range;
   }
-  printf("%u %u %u -> %u\n", reading, min, range, res);
+  /*printf("%u %u %u -> %u\n", reading, min, range, res);*/
   return res;
 }
 
-//TODO: if corruption becomes a noticeable issue, find some more storage and swap writes between two locations
+//note: if corruption becomes a noticeable issue, find some more storage and swap writes between two locations
 struct seqstate {
   uint8_t seqA_start;
   uint8_t seqB_start;
@@ -317,6 +282,7 @@ int main(void) {
       atten_cv_high = read_adc(AIN_ACV);
       atten_rand_high = read_adc(AIN_ARD);
     }
+    shift_registers_io(0);
     printf("Maximums set\n");
     USERROW_t empty;
     while (NVMCTRL.STATUS & (NVMCTRL_EEBUSY_bm | NVMCTRL_FBUSY_bm));
@@ -366,10 +332,10 @@ int main(void) {
     cv_in_gain_correction_a = 50000.0/(float)(val2a - adc_offset);
     cv_in_gain_correction_b = 50000.0/(float)(val2b - adc_offset);
   }
-  uint16_t fade_a_div = fade_a_range/17;
-  uint16_t fade_b_div = fade_b_range/17;
-  uint16_t pattern_a_div = pattern_a_range/41;
-  uint16_t pattern_b_div = pattern_b_range/41;
+  uint16_t fade_a_div = fade_a_range/num_fades;
+  uint16_t fade_b_div = fade_b_range/num_fades;
+  uint16_t pattern_a_div = pattern_a_range/num_patterns;
+  uint16_t pattern_b_div = pattern_b_range/num_patterns;
 
   volatile struct seqstate save_buffer_data;
   volatile uint8_t * save_buffer = &state;
@@ -382,7 +348,7 @@ int main(void) {
   uint16_t cv_in_a_norm = 0;
   uint8_t lfo_up = 1;
 
-  // allows mounting the module upside down and handles upside down pots
+  // allows mounting the module upside down
   uint8_t invert_atten_cv = atten_cv_high < atten_cv_low; 
   uint8_t invert_atten_rand = atten_rand_high < atten_rand_low; 
   uint16_t atten_cv_min = invert_atten_cv ? atten_cv_high : atten_cv_low;
@@ -390,17 +356,11 @@ int main(void) {
   uint16_t atten_rand_min = invert_atten_rand ? atten_rand_high : atten_rand_low;
   uint16_t atten_rand_range = invert_atten_rand ? atten_rand_low - atten_rand_high : atten_rand_high - atten_rand_low;
 
-  /*uint16_t test_val = 0;*/
-  
   /*while (1) {*/
     /*printf("hello\n");*/
   /*}*/
 
   printf("hello\n");
-  /*while (1) {*/
-    /*shift_out = LED_B_R;*/
-    /*shift_registers_io(shift_out);*/
-  /*}*/
   while (1) {
     if (cv_in_a_norm == 0xFFFF) {
       lfo_up = 0;
@@ -433,13 +393,11 @@ int main(void) {
       clocklow_b = 0;
     }
     uint8_t reset = (PORTF.IN >> 6) & 1;
-    /*if (clock_a | clock_b) {*/
-      /*printf("CA:%u CB:%u R:%u PA:%u PB:%u\n", clock_a, clock_b, reset, process_a, process_b);*/
-    /*}*/
     if (!(process_a | process_b)) {
 
       // every time around that we aren't processing, save the next byte of the state 
       // this allows the saving to be interrupted by the sequencer
+      // todo bottleneck?
       if (!(NVMCTRL.STATUS & (NVMCTRL_EEBUSY_bm | NVMCTRL_FBUSY_bm)) & save_bytes_left > 0) {
         uint8_t offset = state_size - save_bytes_left;
         unsigned char this_byte = save_buffer[offset];
@@ -455,17 +413,12 @@ int main(void) {
         state.index_b = 0;
     }
 
-    uint16_t cv_in_a = ((float)read_adc(AIN_CVA))*cv_in_gain_correction_a;
-    /*printf("=====\n%u\n=====\n", cv_in_a);*/
-
-    uint16_t cv_in_b = ((float)read_adc(AIN_CVB))*cv_in_gain_correction_b;
-
     // inputs
     uint16_t fade_a = adjust(read_adc(AIN_FDA), fade_a_min, fade_a_range);
     uint16_t pattern_a = adjust(read_adc(AIN_PTA), pattern_a_min, pattern_a_range);
-    uint16_t sample_a = read_adc(AIN_SMA);
     uint16_t fade_b = adjust(read_adc(AIN_FDB), fade_b_min, fade_b_range);
     uint16_t pattern_b = adjust(read_adc(AIN_PTB), pattern_b_min, pattern_b_range);
+    uint16_t sample_a = read_adc(AIN_SMA);
     uint16_t sample_b = read_adc(AIN_SMB);
     uint16_t atten_cv = read_adc(AIN_ACV);
     if (invert_atten_cv) {
@@ -488,8 +441,8 @@ int main(void) {
     uint8_t btn_zero_a = (buttons >> 6) & 1;
     uint8_t btn_rand_a = (buttons >> 7) & 1;
 
-    uint8_t sampling_a = btn_sample_a | btn_sample_internal_a | (sample_a > 2000); //TODO hw changes
-    uint8_t sampling_b = btn_sample_b | btn_sample_internal_b | (sample_b > 2000); //TODO 
+    uint8_t sampling_a = btn_sample_a | btn_sample_internal_a | (sample_a > 4000); //TODO noise issues
+    uint8_t sampling_b = btn_sample_b | btn_sample_internal_b | (sample_b > 4000);
     uint8_t sample_ext_a = sample_a > 7500; // 0 = internal, 1 = external
     uint8_t sample_ext_b = sample_b > 7500; // 0 = internal, 1 = external
     if (btn_sample_a) {
@@ -502,7 +455,6 @@ int main(void) {
     } else if (btn_sample_internal_b) {
       sample_ext_b = 0;
     }
-    /*uint8_t sample_ext_b = !btn_sample_internal_b; // 0 = internal, 1 = external*/
 
     uint8_t seqA_idx = (state.seqA_start + state.index_a) % 16;
     uint8_t seqB_idx = (state.seqB_start + state.index_b) % 16;
@@ -512,20 +464,20 @@ int main(void) {
     }
 
     uint8_t fade_quant_a = fade_a / fade_a_div;
-    if (fade_quant_a > 16) {
+    if (fade_quant_a > num_patterns-1) {
       fade_quant_a = 16;
     }
     uint8_t fade_quant_b = fade_b / fade_b_div;
-    if (fade_quant_b > 16) {
+    if (fade_quant_b > num_patterns-1) {
       fade_quant_b = 16;
     }
     uint8_t step_a = pattern_a / pattern_a_div;
-    if (step_a > 40) {
-      step_a = 40;
+    if (step_a > num_patterns-1) {
+      step_a = num_patterns-1;
     }
     uint8_t step_b = pattern_b / pattern_b_div;
-    if (step_b > 40) {
-      step_b = 40;
+    if (step_b > num_patterns-1) {
+      step_b = num_patterns-1;
     }
 
     /*printf("[A] rand:%u sample:%u sample_internal:%u zero:%u\n", btn_rand_a, btn_sample_a, btn_sample_internal_a, btn_zero_a);*/
@@ -534,31 +486,15 @@ int main(void) {
     /*printf("[B] fade:%u pattern:%u sample:%u ext=%u\n", fade_quant_b, step_b, sample_b, sample_ext_b);*/
     /*printf("[ATTEN] cv:%u rand:%u\n", atten_cv, atten_rand);*/
 
-    uint16_t unflipped_a = 0;
-    uint16_t unflipped_b = 0;
-    for (uint8_t i = 0; i < 16; i++) {
-      if (i < fade_quant_a) {
-        unflipped_a = (unflipped_a << 1) | 1;
-      }
-      if (i < fade_quant_b) {
-        unflipped_b = (unflipped_b << 1) | 1;
-      }
-    }
+    uint16_t flipped_a = pattern_table[step_a][fade_quant_a];
+    uint16_t flipped_b = pattern_table[step_b][fade_quant_b];
 
-    // I think I want to do the unnecessary slow steps even when one side isn't clocked
-    // to keep latency consistent for easier syncing with external modules
-    uint16_t flipped_a = flip(unflipped_a, step_a);
-    uint16_t flipped_b = flip(unflipped_b, step_b);
+    uint8_t a_lr = (flipped_a >> (15-state.index_a)) & 1;
+    uint8_t b_lr = (flipped_b >> (15-state.index_b)) & 1;
 
-    uint8_t a_lr = (flipped_a >> state.index_a) & 1;
-    uint8_t b_lr = (flipped_b >> state.index_b) & 1;
+    float rand_pct = fmin(1, ((float)atten_rand) / atten_rand_range);
+    float cv_pct = fmin(1, ((float)atten_cv) / atten_rand_range);
 
-    /*shift_out = shift_out & 0b01111110;*/
-
-    float rand_pct = fmin(0.9999999, ((float)atten_rand) / atten_rand_range);
-    float cv_pct = fmin(0.9999999, ((float)atten_cv) / atten_rand_range);
-    cv_in_a *= cv_pct;
-    cv_in_b *= cv_pct;
     uint16_t random_b = 0;
     if (btn_rand_b) {
       random_b = prng();
@@ -575,32 +511,32 @@ int main(void) {
     uint16_t out_a;
     uint16_t out_b;
 
-    /*printf("start processing\n");*/
+    // do this as late as possible so we don't catch slew
+    uint16_t cv_in_a = ((float)read_adc(AIN_CVA))*cv_in_gain_correction_a;
+    uint16_t cv_in_b = ((float)read_adc(AIN_CVB))*cv_in_gain_correction_b;
+    cv_in_a *= cv_pct;
+    cv_in_b *= cv_pct;
+
     if (process_a) {
-      /*printf("process_a\n");*/
-      TCD0.CMPASET = 2047-(cv_in_a >> 5);
       shift_out = shift_out & ~LED_A_L & ~LED_A_R & ~LED_A_C & ~GATE_A;
-      shift_out = shift_out | (a_lr ? (LED_A_L | GATE_A) : LED_A_R);
+      shift_out = shift_out | (a_lr ? (LED_A_R | GATE_A) : LED_A_L);
       if (sampling_a) {
         shift_out = shift_out | LED_A_C; 
       }
       if (sampling_a && sample_ext_a) {
         out_a = quantize_semitone(cv_in_a);
-        /*printf("\nout_a=%u\n", out_a);*/
       } else if (btn_rand_a) {
         out_a = quantize_semitone(random_a);
       } else if (btn_zero_a) {
         out_a = quantize_semitone(atten_rand);
       } else {
-        out_a = a_lr ? state.seqAL[seqA_idx] : state.seqAR[seqA_idx];
+        out_a = a_lr ? state.seqAR[seqA_idx] : state.seqAL[seqA_idx];
       }
     }
 
     if (process_b) {
-      /*printf("process_b\n");*/
-      TCD0.CMPBSET = 4095-(cv_in_b >> 5);
       shift_out = shift_out & ~LED_B_L & ~LED_B_R & ~LED_B_C & ~GATE_B;
-      shift_out = shift_out | (b_lr ? (LED_B_L | GATE_B) : LED_B_R);
+      shift_out = shift_out | (b_lr ? (LED_B_R | GATE_B) : LED_B_L);
       if (sampling_b) {
         shift_out = shift_out | LED_B_C; 
       }
@@ -611,7 +547,7 @@ int main(void) {
       } else if (btn_zero_b) {
         out_b = quantize_semitone(atten_rand);
       } else {
-        out_b = b_lr ? state.seqBL[seqB_idx] : state.seqBR[seqB_idx];
+        out_b = b_lr ? state.seqBR[seqB_idx] : state.seqBL[seqB_idx];
       }
     }
 
@@ -629,32 +565,29 @@ int main(void) {
     }
 
     if (process_a) {
-      /*printf("dac out a\n");*/
       write_dac(0, out_a * scale_factor_a);
 
       if (a_lr) {
-        state.seqAL[seqA_idx] = out_a;
-      } else {
         state.seqAR[seqA_idx] = out_a;
+      } else {
+        state.seqAL[seqA_idx] = out_a;
       }
 
       state.index_a = (state.index_a + 1) % 16;
     }
 
     if (process_b) {
-      /*printf("dac out b\n");*/
       write_dac(1, out_b * scale_factor_b);
 
       if (b_lr) {
-        state.seqBL[seqB_idx] = out_b;
-      } else {
         state.seqBR[seqB_idx] = out_b;
+      } else {
+        state.seqBL[seqB_idx] = out_b;
       }
 
       state.index_b = (state.index_b + 1) % 16;
     }
 
-    pwm_out_sync();
     shift_registers_io(shift_out);
 
     /*printf("%u %u\n", out_a, out_b);*/
