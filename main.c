@@ -156,12 +156,12 @@ uint8_t shift_registers_io(uint8_t out) {
 #define AIN_SMB 16 
 
 #define GATE_B  0b10000000
-#define LED_B_R 0b00100000
-#define LED_B_C 0b01000000
-#define LED_B_L 0b00010000
-#define LED_A_R 0b00000100
-#define LED_A_C 0b00001000
 #define LED_A_L 0b00000010
+#define LED_A_C 0b00001000
+#define LED_A_R 0b00000100
+#define LED_B_L 0b00010000
+#define LED_B_C 0b01000000
+#define LED_B_R 0b00100000
 #define GATE_A  0b00000001
 
 uint16_t adc_offset;
@@ -397,10 +397,9 @@ int main(void) {
   /*}*/
 
   printf("hello\n");
-  /*while (1) {*/
-    /*shift_out = LED_B_R;*/
-    /*shift_registers_io(shift_out);*/
-  /*}*/
+  while (1) {
+    shift_registers_io(read_adc(AIN_FDB)>>1);
+  }
   while (1) {
     if (cv_in_a_norm == 0xFFFF) {
       lfo_up = 0;
